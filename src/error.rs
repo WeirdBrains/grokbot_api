@@ -61,8 +61,10 @@ impl Error {
         }
     }
 
+    /// The session/credential was rejected. The gateway answers an expired session
+    /// with 417 (empty body) rather than 401, so both mean "re-authenticate".
     pub fn is_unauthorized(&self) -> bool {
-        self.status() == Some(401)
+        matches!(self.status(), Some(401) | Some(417))
     }
 
     /// Delivery state if this error came from `sendPrompt`.
@@ -72,5 +74,20 @@ impl Error {
             Error::Http { status, .. } if *status < 500 => Delivery::Rejected,
             _ => Delivery::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+    fn http(status: u16) -> Error {
+        Error::Http { status, method: "listAgents".into(), message: String::new() }
+    }
+    #[test]
+    fn expired_session_417_counts_as_unauthorized() {
+        assert!(http(401).is_unauthorized());
+        assert!(http(417).is_unauthorized());
+        assert!(!http(400).is_unauthorized());
+        assert!(!http(500).is_unauthorized());
     }
 }
