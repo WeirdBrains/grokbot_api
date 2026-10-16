@@ -496,17 +496,20 @@ impl Client {
 
     /// `promptAcceptanceStatus {agentId, clientNonce}`: the gateway's own lookup of
     /// whether a prompt with this nonce landed (what the desktop app uses when a send's
-    /// outcome is uncertain). Returns the raw status object.
+    /// outcome is uncertain).
     pub async fn prompt_acceptance_status(
         &self,
         agent_id: &str,
         client_nonce: &str,
-    ) -> Result<Value> {
-        self.call_raw(
-            "promptAcceptanceStatus",
-            json!({ "agentId": agent_id, "clientNonce": client_nonce }),
-        )
-        .await
+    ) -> Result<AcceptanceStatus> {
+        Ok(AcceptanceStatus::from_value(
+            &self
+                .call_raw(
+                    "promptAcceptanceStatus",
+                    json!({ "agentId": agent_id, "clientNonce": client_nonce }),
+                )
+                .await?,
+        ))
     }
 
     /// `getAgentTranscriptTail {id, limit, beforeSeq?}` (limit clamped to 1..=200).
@@ -728,6 +731,47 @@ mod tests {
     }
 }
 
+/// Result of `promptAcceptanceStatus`, mirroring the desktop app's mapping:
+/// `{outcome: "not-found" | "unknown-durability"}` or
+/// `{outcome: "found", record: {status: "accepted" | "rejected" | "pending", rejectionCode?}}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcceptanceStatus {
+    /// The gateway has the prompt.
+    Accepted,
+    /// The gateway refused it (with its rejection code, if any). Not delivered.
+    Rejected(Option<String>),
+    /// Still being processed; ask again shortly.
+    Pending,
+    /// No record of this nonce: it never arrived, so resending is safe.
+    NotFound,
+    /// The gateway can't tell (or the response was unrecognised).
+    Unknown,
+}
+
+impl AcceptanceStatus {
+    pub fn from_value(raw: &Value) -> Self {
+        let v = raw.get("value").filter(|v| v.is_object()).unwrap_or(raw);
+        match v.get("outcome").and_then(Value::as_str) {
+            Some("not-found") => return Self::NotFound,
+            Some("unknown-durability") => return Self::Unknown,
+            _ => {}
+        }
+        let rec = v.get("record").unwrap_or(v);
+        match rec.get("status").and_then(Value::as_str) {
+            Some("accepted") => Self::Accepted,
+            Some("pending") => Self::Pending,
+            Some("rejected") => Self::Rejected(
+                rec.get("rejectionCode")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            ),
+            Some("not-found") => Self::NotFound,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// Classify a 2xx `sendPrompt` body.
 ///
 /// The gateway (per the desktop app) answers a successful send with
@@ -792,5 +836,24 @@ mod send_classify_tests {
                 .delivery(),
             Delivery::Rejected
         );
+        use AcceptanceStatus as A;
+        let a = |v: Value| A::from_value(&v);
+        assert_eq!(
+            a(json!({"outcome": "found", "record": {"status": "accepted"}})),
+            A::Accepted
+        );
+        assert_eq!(
+            a(
+                json!({"status": "ok", "value": {"outcome": "found", "record": {"status": "rejected", "rejectionCode": "too_long"}}})
+            ),
+            A::Rejected(Some("too_long".into()))
+        );
+        assert_eq!(
+            a(json!({"outcome": "found", "record": {"status": "pending"}})),
+            A::Pending
+        );
+        assert_eq!(a(json!({"outcome": "not-found"})), A::NotFound);
+        assert_eq!(a(json!({"outcome": "unknown-durability"})), A::Unknown);
+        assert_eq!(a(json!({})), A::Unknown);
     }
 }

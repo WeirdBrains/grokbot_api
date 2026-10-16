@@ -35,8 +35,8 @@ mod transcript;
 mod types;
 
 pub use client::{
-    Client, ClientOptions, DEFAULT_BACKEND_BASE, DEFAULT_CLIENT_TYPE, DEFAULT_CLIENT_VERSION,
-    DEFAULT_SANDBOX_NAMESPACE, MAX_RESPONSE_BYTES, TIMEOUT, ensure_sandbox,
+    AcceptanceStatus, Client, ClientOptions, DEFAULT_BACKEND_BASE, DEFAULT_CLIENT_TYPE,
+    DEFAULT_CLIENT_VERSION, DEFAULT_SANDBOX_NAMESPACE, MAX_RESPONSE_BYTES, TIMEOUT, ensure_sandbox,
 };
 pub use error::{Delivery, Error, Result};
 pub use policy::{ALLOW_LOCAL_ENV, Policy};
