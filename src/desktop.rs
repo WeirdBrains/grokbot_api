@@ -80,11 +80,41 @@ pub fn descriptor_path(
     app_data_dir(home, platform, env).join("gateway-descriptor.json")
 }
 
+/// Path to `sand-secrets.json` (the fallback source of a Cursor access token).
+pub fn sand_secrets_path(
+    home: &Path,
+    platform: Platform,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> PathBuf {
+    app_data_dir(home, platform, env).join("sand-secrets.json")
+}
+
 /// One saved entry's ciphertext (base64). `key` is `"default"` for the v1 single-entry format.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopEntry {
     pub key: String,
     pub encrypted: String,
+}
+
+/// What `/login desktop` resolved to.
+pub enum DesktopCredential {
+    /// A ready gateway session, decrypted from `gateway-descriptor.json`.
+    Session(Session),
+    /// A Cursor access token from `sand-secrets.json`, to exchange via EnsureSandBox.
+    CursorToken(String),
+}
+
+/// A Cursor account found in `sand-secrets.json`, labeled for selection.
+type SandAccountsRaw = (String, Vec<(String, serde_json::Map<String, Value>)>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SandAccount {
+    /// The opaque account id used as the stored entry key.
+    pub key: String,
+    /// A human label (the account email when available, else the key).
+    pub label: String,
+    /// Whether this is the app's active account.
+    pub active: bool,
 }
 
 /// Parse a descriptor's JSON into the list of encrypted entries (v1 → one, v2 → many).
@@ -383,6 +413,222 @@ impl DesktopConfig {
         };
         let clear = self.decrypt(&entry.encrypted)?;
         session_from_clear(&clear, policy)
+    }
+
+    /// Path to `sand-secrets.json` in the app data dir.
+    pub fn sand_secrets_path(&self) -> PathBuf {
+        sand_secrets_path(&self.home, self.platform, &self.env)
+    }
+
+    /// Whether the `sand-secrets.json` fallback exists.
+    pub fn sand_present(&self) -> bool {
+        self.sand_secrets_path().exists()
+    }
+
+    /// The decrypted `(active_key, [(account_key, fields)])` from `sand-secrets.json`.
+    /// The field values stay encrypted here; only the outer structure is parsed.
+    fn read_sand_accounts(&self) -> Result<SandAccountsRaw, Error> {
+        let path = self.sand_secrets_path();
+        let json = std::fs::read_to_string(&path).map_err(|e| {
+            desktop_err(
+                "READ_FAILED",
+                format!("Could not read {}: {e}", path.display()),
+            )
+        })?;
+        let top: Value = serde_json::from_str(&json).map_err(|e| {
+            desktop_err(
+                "INVALID_SAND",
+                format!("sand-secrets.json is not valid JSON: {e}"),
+            )
+        })?;
+        let ca_str = top
+            .get("cursor-accounts")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                desktop_err(
+                    "NOT_SIGNED_IN",
+                    "sand-secrets.json has no cursor-accounts; sign in from the desktop app first.",
+                )
+            })?;
+        let ca: Value = serde_json::from_str(ca_str).map_err(|e| {
+            desktop_err(
+                "INVALID_SAND",
+                format!("sand-secrets.json cursor-accounts is not valid JSON: {e}"),
+            )
+        })?;
+        let active = ca
+            .get("active")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let accounts = ca
+            .get("accounts")
+            .and_then(Value::as_object)
+            .filter(|m| !m.is_empty())
+            .ok_or_else(|| desktop_err("NOT_SIGNED_IN", "The desktop app has no saved Cursor accounts; sign in from the desktop app first."))?;
+        let mut out = vec![];
+        for (k, v) in accounts {
+            if let Value::Object(m) = v {
+                out.push((k.clone(), m.clone()));
+            }
+        }
+        Ok((active, out))
+    }
+
+    /// The Cursor accounts in `sand-secrets.json`, sorted by key. Built from plaintext
+    /// metadata only (opaque account id, `active` marker): nothing is decrypted to list them,
+    /// so no decrypted value (email, token) is ever shown.
+    pub fn sand_accounts(&self) -> Result<Vec<SandAccount>, Error> {
+        let (active, mut accts) = self.read_sand_accounts()?;
+        accts.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(accts
+            .into_iter()
+            .enumerate()
+            .map(|(i, (key, _))| SandAccount {
+                label: format!("{}) {}…", i + 1, &key[..key.len().min(8)]),
+                active: key == active,
+                key,
+            })
+            .collect())
+    }
+
+    /// Resolve and decrypt the Cursor access token for one account in `sand-secrets.json`.
+    /// `choice` is a 1-based number, a full account key, or a unique key prefix (4+ chars);
+    /// `None` picks the only account. Only the chosen account's access token is decrypted.
+    fn load_sand_token(&self, choice: Option<&str>) -> Result<String, Error> {
+        let (_, mut accts) = self.read_sand_accounts()?;
+        accts.sort_by(|a, b| a.0.cmp(&b.0));
+        let listing = || {
+            self.sand_accounts()
+                .map(|sa| {
+                    sa.into_iter()
+                        .map(|s| {
+                            if s.active {
+                                format!("{} (active)", s.label)
+                            } else {
+                                s.label
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default()
+        };
+        let idx = match choice {
+            None if accts.len() == 1 => 0,
+            None => {
+                return Err(desktop_err(
+                    "AMBIGUOUS_ENTRIES",
+                    format!(
+                        "The desktop app has several Cursor accounts: {}. Choose one with /login desktop <number> (tip: /account add <alias> first so each gets its own gb account).",
+                        listing()
+                    ),
+                ));
+            }
+            Some(c) => {
+                let c = c.trim();
+                let by_num = c
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| (1..=accts.len()).contains(n))
+                    .map(|n| n - 1);
+                let by_key = accts.iter().position(|(k, _)| k == c);
+                let by_prefix = || {
+                    let m: Vec<usize> = accts
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (k, _))| c.len() >= 4 && k.starts_with(c))
+                        .map(|(i, _)| i)
+                        .collect();
+                    (m.len() == 1).then(|| m[0])
+                };
+                by_key.or(by_num).or_else(by_prefix).ok_or_else(|| {
+                    desktop_err(
+                        "NO_SUCH_ENTRY",
+                        format!("No desktop Cursor account '{c}'. Available: {}", listing()),
+                    )
+                })?
+            }
+        };
+        let enc = accts[idx]
+            .1
+            .get("cursor-access-token")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                desktop_err(
+                    "INCOMPLETE_DESCRIPTOR",
+                    "sand-secrets.json account has no cursor-access-token.",
+                )
+            })?;
+        self.decrypt(enc)
+    }
+
+    /// The stable stored key for a sand choice (so a 401 re-read picks the same account).
+    pub fn sand_key_for(&self, choice: Option<&str>) -> Result<Option<String>, Error> {
+        let accts = self.sand_accounts()?;
+        Ok(match choice {
+            None if accts.len() == 1 => Some(accts[0].key.clone()),
+            None => None,
+            Some(c) => {
+                let c = c.trim();
+                accts
+                    .iter()
+                    .position(|a| a.key == c)
+                    .or_else(|| {
+                        c.parse::<usize>()
+                            .ok()
+                            .filter(|n| (1..=accts.len()).contains(n))
+                            .map(|n| n - 1)
+                    })
+                    .or_else(|| {
+                        let m: Vec<usize> = accts
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, a)| c.len() >= 4 && a.key.starts_with(c))
+                            .map(|(i, _)| i)
+                            .collect();
+                        (m.len() == 1).then(|| m[0])
+                    })
+                    .map(|i| accts[i].key.clone())
+            }
+        })
+    }
+
+    /// Resolve a desktop credential: `gateway-descriptor.json` first, then the
+    /// `sand-secrets.json` Cursor-token fallback. Only called from `/login desktop`.
+    pub fn load_credential(
+        &self,
+        key: Option<&str>,
+        policy: &Policy,
+    ) -> Result<DesktopCredential, Error> {
+        if self.descriptor_path().exists() {
+            return self.load_entry(key, policy).map(DesktopCredential::Session);
+        }
+        if self.sand_present() {
+            return self
+                .load_sand_token(key)
+                .map(DesktopCredential::CursorToken);
+        }
+        let dir = app_data_dir(&self.home, self.platform, &self.env);
+        Err(if dir.exists() {
+            desktop_err(
+                "NOT_SIGNED_IN",
+                format!(
+                    "The Grok Bot desktop app is installed but has no saved session (no gateway-descriptor.json or sand-secrets.json in {}). Sign in from the desktop app first.",
+                    dir.display()
+                ),
+            )
+        } else {
+            desktop_err(
+                "APP_NOT_FOUND",
+                format!(
+                    "The Grok Bot desktop app data was not found at {}.",
+                    dir.display()
+                ),
+            )
+        })
     }
 
     fn decrypt(&self, encrypted: &str) -> Result<String, Error> {
@@ -790,9 +1036,174 @@ mod tests {
                 .gateway_url,
             "https://b.cursorvm.com"
         );
+
         assert!(matches!(
             cfg.load_entry(Some("nope"), &Policy::default()),
             Err(Error::Desktop { .. })
+        ));
+    }
+
+    fn write_sand(app: &std::path::Path, accounts: &[(&str, &str)], active: &str) {
+        use serde_json::{Map, Value, json};
+        let mut m = Map::new();
+        for (key, tok) in accounts {
+            let enc_tok = encrypt_cbc(tok, "os-pw", Platform::Linux, "v11");
+            let enc_prof = encrypt_cbc(
+                r#"{"email":"u@example.com","name":"U"}"#,
+                "os-pw",
+                Platform::Linux,
+                "v11",
+            );
+            m.insert(
+                key.to_string(),
+                json!({
+                    "cursor-access-token": enc_tok,
+                    "cursor-account-profile": enc_prof,
+                    "cursor-refresh-token": enc_tok,
+                    "cursor-selected-team-id": encrypt_cbc("t", "os-pw", Platform::Linux, "v11"),
+                }),
+            );
+        }
+        let ca = Value::Object({
+            let mut o = Map::new();
+            o.insert("active".into(), Value::String(active.into()));
+            o.insert("accounts".into(), Value::Object(m));
+            o
+        });
+        let top = json!({
+            "version": 1,
+            "cursor-machine-id": "x",
+            "cursor-accounts": ca.to_string(),
+            "local-exec-file-key": "y",
+        });
+        std::fs::write(app.join("sand-secrets.json"), top.to_string()).unwrap();
+    }
+
+    #[test]
+    fn sand_secrets_single_account_yields_cursor_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join(".config/Grok Bot");
+        std::fs::create_dir_all(&app).unwrap();
+        write_sand(
+            &app,
+            &[(
+                "acctaaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666",
+                "cursor-tok-A",
+            )],
+            "acctaaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666",
+        );
+        let cfg = DesktopConfig {
+            platform: Platform::Linux,
+            home: dir.path().to_path_buf(),
+            env: Box::new(|_| None),
+            os_password: Some("os-pw".into()),
+        };
+        assert!(!cfg.present());
+        assert!(cfg.sand_present());
+        match cfg.load_credential(None, &Policy::default()).unwrap() {
+            DesktopCredential::CursorToken(t) => assert_eq!(t, "cursor-tok-A"),
+            DesktopCredential::Session(_) => panic!("expected CursorToken"),
+        }
+        let key = cfg.sand_key_for(None).unwrap().unwrap();
+        assert!(key.starts_with("acctaaaa"));
+    }
+
+    #[test]
+    fn sand_secrets_multi_needs_choice_by_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join(".config/Grok Bot");
+        std::fs::create_dir_all(&app).unwrap();
+        write_sand(
+            &app,
+            &[
+                (
+                    "aaaakey1111bbbb2222cccc3333dddd4444eeee5555ffff6666",
+                    "tok-A",
+                ),
+                (
+                    "zzzzkey1111bbbb2222cccc3333dddd4444eeee5555ffff6666",
+                    "tok-Z",
+                ),
+            ],
+            "zzzzkey1111bbbb2222cccc3333dddd4444eeee5555ffff6666",
+        );
+        let cfg = DesktopConfig {
+            platform: Platform::Linux,
+            home: dir.path().to_path_buf(),
+            env: Box::new(|_| None),
+            os_password: Some("os-pw".into()),
+        };
+        let list = cfg.sand_accounts().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list[0].label.starts_with("1) "));
+        assert!(list[1].active);
+        assert!(matches!(
+            cfg.load_credential(None, &Policy::default()),
+            Err(Error::Desktop { code, .. }) if code == "AMBIGUOUS_ENTRIES"
+        ));
+        match cfg.load_credential(Some("2"), &Policy::default()).unwrap() {
+            DesktopCredential::CursorToken(t) => assert_eq!(t, "tok-Z"),
+            _ => panic!("expected CursorToken"),
+        }
+        assert_eq!(
+            cfg.sand_key_for(Some("2")).unwrap().as_deref(),
+            Some("zzzzkey1111bbbb2222cccc3333dddd4444eeee5555ffff6666")
+        );
+    }
+
+    #[test]
+    fn descriptor_wins_over_sand_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join(".config/Grok Bot");
+        std::fs::create_dir_all(&app).unwrap();
+        write_sand(
+            &app,
+            &[(
+                "k1111111111111111111111111111111111111111111111111111",
+                "tok",
+            )],
+            "k1111111111111111111111111111111111111111111111111111",
+        );
+        let enc = encrypt_cbc(
+            &inner("https://box.cursorvm.com"),
+            "os-pw",
+            Platform::Linux,
+            "v11",
+        );
+        std::fs::write(
+            app.join("gateway-descriptor.json"),
+            format!(r#"{{"version":1,"encrypted":"{enc}"}}"#),
+        )
+        .unwrap();
+        let cfg = DesktopConfig {
+            platform: Platform::Linux,
+            home: dir.path().to_path_buf(),
+            env: Box::new(|_| None),
+            os_password: Some("os-pw".into()),
+        };
+        match cfg.load_credential(None, &Policy::default()).unwrap() {
+            DesktopCredential::Session(s) => assert_eq!(s.gateway_token, "gw-secret"),
+            DesktopCredential::CursorToken(_) => panic!("descriptor should win"),
+        }
+    }
+
+    #[test]
+    fn sand_secrets_absent_and_app_missing_are_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = DesktopConfig {
+            platform: Platform::Linux,
+            home: dir.path().to_path_buf(),
+            env: Box::new(|_| None),
+            os_password: None,
+        };
+        assert!(matches!(
+            cfg.load_credential(None, &Policy::default()),
+            Err(Error::Desktop { code, .. }) if code == "APP_NOT_FOUND"
+        ));
+        std::fs::create_dir_all(dir.path().join(".config/Grok Bot")).unwrap();
+        assert!(matches!(
+            cfg.load_credential(None, &Policy::default()),
+            Err(Error::Desktop { code, .. }) if code == "NOT_SIGNED_IN"
         ));
     }
 }

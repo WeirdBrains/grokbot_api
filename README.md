@@ -45,7 +45,7 @@ read the new session with `take_refreshed_session()`.
 **Desktop session (feature `desktop-session`, off by default):** `grokbot_api::desktop` reads the Grok Bot desktop app's
 `gateway-descriptor.json`, mirroring grok-bot-cli's `app-session.js`. It supports v1 and v2 descriptors, Linux v10/v11
 (secret-tool), macOS Keychain and Windows DPAPI with AES-256-GCM. `DesktopConfig::new(platform).load_entry(entry, &policy)`
-returns a policy-checked `Session`. Errors are `Error::Desktop { code, message }`, where `code` is one of `APP_NOT_FOUND`,
+returns a policy-checked `Session`. `load_credential` prefers the descriptor and falls back to decrypting `sand-secrets.json`'s `cursor-accounts` into a Cursor access token (`DesktopCredential::CursorToken`). Errors are `Error::Desktop { code, message }`, where `code` is one of `APP_NOT_FOUND`,
 `NOT_SIGNED_IN`, `SECRET_TOOL_MISSING`, `AMBIGUOUS_ENTRIES`, `NO_SUCH_ENTRY`, `DECRYPT_FAILED` and so on. Only call it on an explicit user request.
 
 **Policy:** `Policy::check_gateway` / `check_backend` implement the host allowlist (see the workspace README).
