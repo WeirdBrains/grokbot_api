@@ -78,6 +78,13 @@ async fn send_prompt_receipt_and_delivery_states() {
         .mount(&server)
         .await;
     Mock::given(path("/api/sendPrompt"))
+        .and(body_partial_json(
+            json!({"prompt": "real", "clientNonce": "n9"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accepted": true})))
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/sendPrompt"))
         .and(body_partial_json(json!({"prompt": "noreceipt"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&server)
@@ -108,6 +115,20 @@ async fn send_prompt_receipt_and_delivery_states() {
         .await
         .unwrap_err();
     assert_eq!(e.delivery(), Delivery::Rejected);
+    let r = c
+        .send_prompt(&SendPrompt {
+            agent_id: "a1".into(),
+            prompt: "real".into(),
+            client_nonce: Some("n9".into()),
+            reply_to_id: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        (r.message_id.as_deref(), r.delivery),
+        (Some("n9"), Delivery::Accepted),
+        "the gateway's real success shape is accepted"
+    );
     let r = c
         .send_prompt(&SendPrompt::new("a1", "noreceipt"))
         .await

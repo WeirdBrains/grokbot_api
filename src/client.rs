@@ -485,21 +485,28 @@ impl Client {
             body["replyToId"] = json!(r);
         }
         let raw = self.call_raw("sendPrompt", body).await?;
-        let message_id = raw
-            .get("messageId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let delivery = if message_id.is_some() {
-            Delivery::Accepted
-        } else {
-            Delivery::Unknown
-        };
+        let (delivery, message_id) = classify_send(&raw, &nonce)?;
         Ok(SendReceipt {
             message_id,
             client_nonce: nonce,
             delivery,
             raw,
         })
+    }
+
+    /// `promptAcceptanceStatus {agentId, clientNonce}`: the gateway's own lookup of
+    /// whether a prompt with this nonce landed (what the desktop app uses when a send's
+    /// outcome is uncertain). Returns the raw status object.
+    pub async fn prompt_acceptance_status(
+        &self,
+        agent_id: &str,
+        client_nonce: &str,
+    ) -> Result<Value> {
+        self.call_raw(
+            "promptAcceptanceStatus",
+            json!({ "agentId": agent_id, "clientNonce": client_nonce }),
+        )
+        .await
     }
 
     /// `getAgentTranscriptTail {id, limit, beforeSeq?}` (limit clamped to 1..=200).
@@ -717,6 +724,73 @@ mod tests {
         assert_eq!(
             redact("Authorization: Bearer abc.def, more", &[]),
             "Authorization: Bearer <redacted>, more"
+        );
+    }
+}
+
+/// Classify a 2xx `sendPrompt` body.
+///
+/// The gateway (per the desktop app) answers a successful send with
+/// `{accepted: true}` (box/temporal acceptance or a duplicate of the same nonce) and
+/// a refused one with `{status: "refused", message}`; it does not return a separate
+/// message id; the message id is the client nonce. Older/alternative shapes with a
+/// string `messageId` are also accepted, and a `{status, value}` wrapper is unwrapped.
+fn classify_send(raw: &Value, nonce: &str) -> Result<(Delivery, Option<String>)> {
+    let inner = raw.get("value").filter(|v| v.is_object()).unwrap_or(raw);
+    let pick = |k: &str| inner.get(k).or_else(|| raw.get(k));
+    let message_id = pick("messageId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let refused = raw.get("status").and_then(Value::as_str) == Some("refused")
+        || pick("accepted").and_then(Value::as_bool) == Some(false);
+    if refused {
+        let msg = pick("message")
+            .and_then(Value::as_str)
+            .unwrap_or("prompt refused by the gateway");
+        return Err(Error::Http {
+            method: "sendPrompt".into(),
+            status: 422,
+            message: msg.chars().take(300).collect(),
+        });
+    }
+    if message_id.is_some() || pick("accepted").and_then(Value::as_bool) == Some(true) {
+        return Ok((
+            Delivery::Accepted,
+            Some(message_id.unwrap_or_else(|| nonce.to_string())),
+        ));
+    }
+    Ok((Delivery::Unknown, None))
+}
+
+#[cfg(test)]
+mod send_classify_tests {
+    use super::*;
+    #[test]
+    fn classify_shapes() {
+        let ok = |v: Value| classify_send(&v, "n1").unwrap();
+        assert_eq!(
+            ok(json!({"accepted": true})),
+            (Delivery::Accepted, Some("n1".into()))
+        );
+        assert_eq!(
+            ok(json!({"status": "ok", "value": {"accepted": true}})),
+            (Delivery::Accepted, Some("n1".into()))
+        );
+        assert_eq!(
+            ok(json!({"messageId": "m1"})),
+            (Delivery::Accepted, Some("m1".into()))
+        );
+        assert_eq!(ok(json!({})), (Delivery::Unknown, None));
+        assert_eq!(ok(json!(null)), (Delivery::Unknown, None));
+        let e =
+            classify_send(&json!({"status": "refused", "message": "too long"}), "n").unwrap_err();
+        assert_eq!(e.delivery(), Delivery::Rejected);
+        assert!(e.to_string().contains("too long"));
+        assert_eq!(
+            classify_send(&json!({"accepted": false}), "n")
+                .unwrap_err()
+                .delivery(),
+            Delivery::Rejected
         );
     }
 }
