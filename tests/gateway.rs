@@ -152,11 +152,41 @@ async fn transcript_and_thread() {
         .mount(&server)
         .await;
     let c = client(&server).await;
-    let t = c.transcript_tail("a1", 9999).await.unwrap(); // clamped to 200
+    let t = c.transcript_tail("a1", 9999, None).await.unwrap(); // clamped to 200
     assert_eq!(t.entries.len(), 2);
     assert!(t.entries[0].is_from_user());
     assert_eq!(t.entries[1].text, "hello");
     assert_eq!(c.thread("a1", "e1").await.unwrap().entries[0].text, "x");
+}
+
+#[tokio::test]
+async fn transcript_history_pages_with_before_seq() {
+    let server = MockServer::start().await;
+    Mock::given(path("/api/getAgentTranscriptTail"))
+        .and(body_json(json!({"id": "a1", "limit": 2})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "entries": [
+                {"id": "a", "kind": "send-message", "message": {"content": "older"}},
+                {"id": "b", "kind": "send-message", "message": {"content": "newer"}}
+            ],
+            "nextBeforeSeq": 10
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/getAgentTranscriptTail"))
+        .and(body_json(json!({"id": "a1", "limit": 2, "beforeSeq": 10})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "entries": [
+                {"id": "z", "kind": "send-message", "message": {"content": "oldest"}}
+            ]
+        })))
+        .mount(&server)
+        .await;
+    let c = client(&server).await;
+    let t = c.transcript_history("a1", 2, 100).await.unwrap();
+    let texts: Vec<_> = t.entries.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(texts, ["oldest", "older", "newer"]);
 }
 
 #[tokio::test]
@@ -447,7 +477,7 @@ async fn redirects_refused_and_size_capped() {
         Err(Error::Transport { .. })
     ));
     assert!(matches!(
-        c.transcript_tail("a", 1).await,
+        c.transcript_tail("a", 1, None).await,
         Err(Error::TooLarge { .. })
     ));
 }

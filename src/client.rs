@@ -502,16 +502,66 @@ impl Client {
         })
     }
 
-    /// `getAgentTranscriptTail {id, limit}` (limit clamped to 1..=200).
-    pub async fn transcript_tail(&self, id: &str, limit: u32) -> Result<Transcript> {
+    /// `getAgentTranscriptTail {id, limit, beforeSeq?}` (limit clamped to 1..=200).
+    ///
+    /// Omitting `before_seq` returns the newest page. When the response includes
+    /// `nextBeforeSeq`, pass it here to walk older pages (as the desktop app does).
+    pub async fn transcript_tail(
+        &self,
+        id: &str,
+        limit: u32,
+        before_seq: Option<u64>,
+    ) -> Result<Transcript> {
         let limit = limit.clamp(1, 200);
+        let mut body = json!({ "id": id, "limit": limit });
+        if let Some(seq) = before_seq {
+            body["beforeSeq"] = json!(seq);
+        }
         Ok(Transcript::from_value(
-            self.call_raw(
-                "getAgentTranscriptTail",
-                json!({ "id": id, "limit": limit }),
-            )
-            .await?,
+            self.call_raw("getAgentTranscriptTail", body).await?,
         ))
+    }
+
+    /// Walk `getAgentTranscriptTail` pages until the chat is exhausted or `max_entries`
+    /// is reached. Newest page first; returned entries are oldest → newest.
+    pub async fn transcript_history(
+        &self,
+        id: &str,
+        page_size: u32,
+        max_entries: usize,
+    ) -> Result<Transcript> {
+        let page_size = page_size.clamp(1, 200);
+        let mut all: Vec<crate::transcript::Entry> = Vec::new();
+        let mut before = None;
+        let mut raw_pages = Vec::new();
+        loop {
+            let page = self.transcript_tail(id, page_size, before).await?;
+            raw_pages.push(page.raw.clone());
+            if page.entries.is_empty() {
+                break;
+            }
+            // Each page is oldest→newest; older pages are prepended (desktop app does the same).
+            all.splice(0..0, page.entries.iter().cloned());
+            if all.len() >= max_entries {
+                let overflow = all.len() - max_entries;
+                all.drain(0..overflow); // keep the newest max_entries
+                break;
+            }
+            match page.next_before_seq {
+                Some(seq) => before = Some(seq),
+                None => break,
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        all.retain(|e| match &e.id {
+            Some(eid) => seen.insert(eid.clone()),
+            None => true,
+        });
+        Ok(Transcript {
+            entries: all,
+            next_before_seq: before,
+            raw: json!({ "pages": raw_pages }),
+        })
     }
 
     /// `getAgentThread {id, rootId}`.

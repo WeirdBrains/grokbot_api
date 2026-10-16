@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Transcript {
     pub entries: Vec<Entry>,
+    /// Present when more older entries exist; pass as `before_seq` on the next page.
+    pub next_before_seq: Option<u64>,
     pub raw: Value,
 }
 
@@ -16,7 +18,14 @@ impl Transcript {
             .and_then(Value::as_array)
             .map(|a| a.iter().map(Entry::from_value).collect())
             .unwrap_or_default();
-        Transcript { entries, raw: v }
+        let next_before_seq = v
+            .get("nextBeforeSeq")
+            .and_then(|x| x.as_u64().or_else(|| x.as_i64().map(|n| n as u64)));
+        Transcript {
+            entries,
+            next_before_seq,
+            raw: v,
+        }
     }
 }
 
