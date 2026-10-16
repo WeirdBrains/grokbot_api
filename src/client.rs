@@ -14,8 +14,13 @@ pub const TIMEOUT: Duration = Duration::from_secs(30);
 /// Response body cap.
 pub const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
-const CLIENT_VERSION: &str = "0.20.0";
-const NAMESPACE: &str = "prod";
+/// Default `x-cursor-client-version` (Grok Bot 0.70.x era). Prefer detecting the
+/// installed desktop app version via [`crate::desktop::detect_app_version`].
+pub const DEFAULT_CLIENT_VERSION: &str = "0.70.2";
+/// Default `x-cursor-client-type` (matches the desktop app's `SAND_CLIENT_TYPE`).
+pub const DEFAULT_CLIENT_TYPE: &str = "sand";
+/// Default `x-sand-box-namespace` for production EnsureSandBox.
+pub const DEFAULT_SANDBOX_NAMESPACE: &str = "prod";
 
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
@@ -24,6 +29,12 @@ pub struct ClientOptions {
     pub backend_base: String,
     pub timeout: Duration,
     pub max_response_bytes: usize,
+    /// Sent as `x-cursor-client-version` on EnsureSandBox.
+    pub client_version: String,
+    /// Sent as `x-cursor-client-type` on EnsureSandBox.
+    pub client_type: String,
+    /// Sent as `x-sand-box-namespace` on EnsureSandBox.
+    pub sandbox_namespace: String,
 }
 
 impl Default for ClientOptions {
@@ -33,6 +44,9 @@ impl Default for ClientOptions {
             backend_base: DEFAULT_BACKEND_BASE.into(),
             timeout: TIMEOUT,
             max_response_bytes: MAX_RESPONSE_BYTES,
+            client_version: DEFAULT_CLIENT_VERSION.into(),
+            client_type: DEFAULT_CLIENT_TYPE.into(),
+            sandbox_namespace: DEFAULT_SANDBOX_NAMESPACE.into(),
         }
     }
 }
@@ -161,9 +175,9 @@ async fn ensure_sandbox_with(
     let headers: BTreeMap<String, String> = [
         ("connect-protocol-version", "1".to_string()),
         ("authorization", format!("Bearer {access_token}")),
-        ("x-cursor-client-type", "sand".into()),
-        ("x-cursor-client-version", CLIENT_VERSION.into()),
-        ("x-sand-box-namespace", NAMESPACE.into()),
+        ("x-cursor-client-type", opts.client_type.clone()),
+        ("x-cursor-client-version", opts.client_version.clone()),
+        ("x-sand-box-namespace", opts.sandbox_namespace.clone()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

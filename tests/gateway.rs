@@ -320,7 +320,7 @@ async fn ensure_sandbox_headers_and_session() {
         .and(header("authorization", "Bearer cur-tok"))
         .and(header("connect-protocol-version", "1"))
         .and(header("x-cursor-client-type", "sand"))
-        .and(header("x-cursor-client-version", "0.20.0"))
+        .and(header("x-cursor-client-version", "0.70.2"))
         .and(header("x-sand-box-namespace", "prod"))
         .and(body_json(json!({})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({

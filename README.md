@@ -48,6 +48,11 @@ read the new session with `take_refreshed_session()`.
 returns a policy-checked `Session`. `load_credential` prefers the descriptor and falls back to decrypting `sand-secrets.json`'s `cursor-accounts` into a Cursor access token (`DesktopCredential::CursorToken`). Errors are `Error::Desktop { code, message }`, where `code` is one of `APP_NOT_FOUND`,
 `NOT_SIGNED_IN`, `SECRET_TOOL_MISSING`, `AMBIGUOUS_ENTRIES`, `NO_SUCH_ENTRY`, `DECRYPT_FAILED` and so on. Only call it on an explicit user request.
 
+**Client identity:** `ClientOptions::{client_version, client_type, sandbox_namespace}` are sent on EnsureSandBox
+(`x-cursor-client-version` / `x-cursor-client-type` / `x-sand-box-namespace`). Defaults are `0.70.2` / `sand` / `prod`.
+With the `desktop-session` feature, `desktop::detect_app_version` reads the installed app's `package.json` /
+`app.asar` (and `desktop-status.json` as a fallback).
+
 **Policy:** `Policy::check_gateway` / `check_backend` implement the host allowlist (see the workspace README).
 
 **Transcripts:** `Entry { id, role, text, raw }`, `Entry::is_from_user()` (heuristic), `Entry::approval()` for pending

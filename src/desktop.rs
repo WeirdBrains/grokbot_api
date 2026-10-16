@@ -792,6 +792,212 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Semver-ish app version string (e.g. `"0.70.2"`), as used for `x-cursor-client-version`.
+pub type AppVersion = String;
+
+/// Locate the Grok Bot desktop install directory for this platform, if present.
+pub fn find_install_dir(
+    platform: Platform,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Option<PathBuf> {
+    // Highest priority: explicit override (also used by tests).
+    for key in ["GB_GROKBOT_APP_DIR", "GROKBOT_INSTALL_DIR"] {
+        if let Some(p) = env(key).filter(|s| !s.is_empty()) {
+            let pb = PathBuf::from(p);
+            if pb.is_dir() {
+                return Some(pb);
+            }
+        }
+    }
+    let candidates: Vec<PathBuf> = match platform {
+        Platform::Linux => {
+            let mut v = Vec::new();
+            // Prefer the user's desktop file / symlink before hard-coded system paths.
+            if let Some(home) = env("HOME") {
+                let desk = PathBuf::from(&home).join(".local/share/applications/grok-bot.desktop");
+                if let Some(exec) = read_desktop_exec(&desk)
+                    && let Some(parent) = PathBuf::from(&exec).parent()
+                {
+                    v.push(parent.to_path_buf());
+                }
+                v.push(PathBuf::from(&home).join(".local/share/grok-bot"));
+                v.push(PathBuf::from(&home).join(".local/opt/grokbot-linux-port-bin"));
+            }
+            if let Ok(p) = std::fs::canonicalize("/bin/grok-bot")
+                && let Some(parent) = p.parent()
+            {
+                v.push(parent.to_path_buf());
+            }
+            for desk in [PathBuf::from("/usr/share/applications/grok-bot.desktop")] {
+                if let Some(exec) = read_desktop_exec(&desk)
+                    && let Some(parent) = PathBuf::from(&exec).parent()
+                {
+                    v.push(parent.to_path_buf());
+                }
+            }
+            v.extend([
+                PathBuf::from("/opt/grokbot-linux-port-bin"),
+                PathBuf::from("/opt/Grok Bot"),
+                PathBuf::from("/usr/lib/grok-bot"),
+            ]);
+            v
+        }
+        Platform::Macos => {
+            let mut v = vec![PathBuf::from("/Applications/Grok Bot.app")];
+            if let Some(home) = env("HOME") {
+                v.push(PathBuf::from(home).join("Applications/Grok Bot.app"));
+            }
+            v
+        }
+        Platform::Windows => {
+            let mut v = vec![];
+            for key in ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"] {
+                if let Some(base) = env(key) {
+                    v.push(PathBuf::from(base).join("Grok Bot"));
+                }
+            }
+            v
+        }
+    };
+    candidates.into_iter().find(|p| p.is_dir())
+}
+
+fn read_desktop_exec(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Exec=") {
+            let bin = rest.split_whitespace().next()?.to_string();
+            return Some(bin);
+        }
+    }
+    None
+}
+
+fn resources_dir(install: &Path, platform: Platform) -> PathBuf {
+    match platform {
+        Platform::Macos => install.join("Contents/Resources"),
+        _ => install.join("resources"),
+    }
+}
+
+fn version_from_package_json(bytes: &[u8]) -> Option<AppVersion> {
+    let v: Value = serde_json::from_slice(bytes).ok()?;
+    let ver = v.get("version")?.as_str()?.trim();
+    normalize_semver(ver)
+}
+
+/// Strip a leading `v` and keep `MAJOR.MINOR.PATCH` (desktop app does the same).
+pub fn normalize_semver(s: &str) -> Option<AppVersion> {
+    let s = s.trim().trim_start_matches('v');
+    let re_ok = s.split_once('-').map(|(a, _)| a).unwrap_or(s);
+    let mut parts = re_ok.split('.');
+    let (Some(a), Some(b), Some(c)) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    if a.chars().all(|c| c.is_ascii_digit())
+        && b.chars().all(|c| c.is_ascii_digit())
+        && c.chars().all(|c| c.is_ascii_digit())
+    {
+        Some(format!("{a}.{b}.{c}"))
+    } else {
+        None
+    }
+}
+
+/// Read `package.json` (or `product.json`) `version` out of an Electron `.asar`.
+pub fn version_from_asar(asar: &Path) -> Option<AppVersion> {
+    let data = std::fs::read(asar).ok()?;
+    if data.len() < 16 {
+        return None;
+    }
+    // sizePickle: uint32 payload_size(=4) + uint32 header_len
+    let header_len = u32::from_le_bytes(data[4..8].try_into().ok()?) as usize;
+    if data.len() < 8 + header_len {
+        return None;
+    }
+    let header = &data[8..8 + header_len];
+    if header.len() < 8 {
+        return None;
+    }
+    let str_len = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
+    if header.len() < 8 + str_len {
+        return None;
+    }
+    let meta: Value = serde_json::from_slice(&header[8..8 + str_len]).ok()?;
+    let files = meta.get("files")?.as_object()?;
+    for name in ["package.json", "product.json"] {
+        let node = match files.get(name) {
+            Some(n) => n,
+            None => continue,
+        };
+        let off = node.get("offset")?.as_str()?.parse::<usize>().ok()?;
+        let size = node.get("size")?.as_u64()? as usize;
+        let data_start = 8 + header_len;
+        let start = data_start.checked_add(off)?;
+        let end = start.checked_add(size)?;
+        if end > data.len() {
+            continue;
+        }
+        if let Some(v) = version_from_package_json(&data[start..end]) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn version_from_status_json(path: &Path) -> Option<AppVersion> {
+    let v: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    normalize_semver(v.get("appVersion")?.as_str()?)
+}
+
+/// Detect the installed Grok Bot desktop app version (e.g. `"0.70.2"`).
+///
+/// Looks in the install dir's `resources/app/package.json`, `product.json`,
+/// `resources/app.asar`, then (as a last resort) `desktop-status.json` in the
+/// app data dir. Returns `None` when nothing is installed or readable.
+pub fn detect_app_version(
+    platform: Platform,
+    home: &Path,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Option<AppVersion> {
+    if let Some(install) = find_install_dir(platform, env) {
+        let res = resources_dir(&install, platform);
+        for rel in [
+            "app/package.json",
+            "app/product.json",
+            "package.json",
+            "product.json",
+        ] {
+            let p = res.join(rel);
+            if let Ok(bytes) = std::fs::read(&p)
+                && let Some(v) = version_from_package_json(&bytes)
+            {
+                return Some(v);
+            }
+        }
+        let asar = res.join("app.asar");
+        if let Some(v) = version_from_asar(&asar) {
+            return Some(v);
+        }
+        // Debian/FPM packages ship a changelog with the version.
+        let changelog = install.join("changelog.gz");
+        if changelog.exists() {
+            // Avoid pulling in a gzip crate: the filename alone isn't enough; skip.
+        }
+    }
+    // Last resort: the running app writes appVersion into its config dir.
+    let status = app_data_dir(home, platform, env).join("desktop-status.json");
+    version_from_status_json(&status)
+}
+
+impl DesktopConfig {
+    /// Detect the installed desktop app version using this config's platform/home/env.
+    pub fn detect_app_version(&self) -> Option<AppVersion> {
+        detect_app_version(self.platform, &self.home, &self.env)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1205,5 +1411,84 @@ mod tests {
             cfg.load_credential(None, &Policy::default()),
             Err(Error::Desktop { code, .. }) if code == "NOT_SIGNED_IN"
         ));
+    }
+
+    #[test]
+    fn normalize_semver_strips_prerelease() {
+        assert_eq!(normalize_semver("0.70.2").as_deref(), Some("0.70.2"));
+        assert_eq!(normalize_semver("v0.70.2-dev").as_deref(), Some("0.70.2"));
+        assert!(normalize_semver("nope").is_none());
+    }
+
+    #[test]
+    fn detect_app_version_from_unpacked_package_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("opt/grokbot-linux-port-bin");
+        let res = install.join("resources/app");
+        std::fs::create_dir_all(&res).unwrap();
+        std::fs::write(
+            res.join("package.json"),
+            r#"{"name":"sand","version":"0.70.2","productName":"Grok Bot"}"#,
+        )
+        .unwrap();
+        // Point find_install_dir via a fake desktop Exec.
+        let apps = dir.path().join("home/.local/share/applications");
+        std::fs::create_dir_all(&apps).unwrap();
+        std::fs::write(
+            apps.join("grok-bot.desktop"),
+            format!("[Desktop Entry]\nExec={}/grok-bot\n", install.display()),
+        )
+        .unwrap();
+        let install_s = install.to_string_lossy().into_owned();
+        let env = move |k: &str| match k {
+            "GB_GROKBOT_APP_DIR" => Some(install_s.clone()),
+            _ => None,
+        };
+        let v = detect_app_version(Platform::Linux, dir.path(), &env);
+        assert_eq!(v.as_deref(), Some("0.70.2"));
+    }
+
+    #[test]
+    fn detect_app_version_falls_back_to_desktop_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join(".config/Grok Bot");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(
+            app.join("desktop-status.json"),
+            r#"{"version":1,"pid":1,"appVersion":"0.70.2","startedAtMs":0,"signedIn":true}"#,
+        )
+        .unwrap();
+        let v = detect_app_version(Platform::Linux, dir.path(), &|_| None);
+        assert_eq!(v.as_deref(), Some("0.70.2"));
+    }
+
+    #[test]
+    fn version_from_asar_roundtrip_fixture() {
+        // Build a tiny asar with only package.json using the same layout Electron writes.
+        let dir = tempfile::tempdir().unwrap();
+        let pkg = br#"{"name":"sand","version":"1.2.3"}"#;
+        let meta = format!(
+            r#"{{"files":{{"package.json":{{"offset":"0","size":{}}}}}}}"#,
+            pkg.len()
+        );
+        let meta_bytes = meta.as_bytes();
+        // header pickle: uint32 payload_size, uint32 str_len, bytes, pad to 4
+        let mut header = Vec::new();
+        let str_len = meta_bytes.len() as u32;
+        let pad = (4 - (str_len % 4)) % 4;
+        let payload_size = 4 + str_len + pad; // uint32 str_len + string + pad
+        header.extend_from_slice(&payload_size.to_le_bytes());
+        header.extend_from_slice(&str_len.to_le_bytes());
+        header.extend_from_slice(meta_bytes);
+        header.extend(std::iter::repeat_n(0u8, pad as usize));
+        // size pickle: uint32(=4) + uint32(header.len)
+        let mut asar = Vec::new();
+        asar.extend_from_slice(&4u32.to_le_bytes());
+        asar.extend_from_slice(&(header.len() as u32).to_le_bytes());
+        asar.extend_from_slice(&header);
+        asar.extend_from_slice(pkg);
+        let path = dir.path().join("app.asar");
+        std::fs::write(&path, &asar).unwrap();
+        assert_eq!(version_from_asar(&path).as_deref(), Some("1.2.3"));
     }
 }
