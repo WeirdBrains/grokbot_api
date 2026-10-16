@@ -1,0 +1,58 @@
+# grokbot_api
+
+**Unofficial** async Rust client for the Grok Bot gateway.
+
+> The gateway is private and **undocumented**. This crate mirrors what
+> [grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) does
+> (`src/core/gateway.js`, `headers.js`, `url-policy.js`, `transcript.js`, `grok-approvals.js`).
+> Field names were checked against that source, but the API **may change without notice**.
+
+## Protocol
+
+`POST {gateway_url}/api/<method>`, JSON body, headers `content-type: application/json`,
+`authorization: Bearer <gateway_token>`, plus session headers. Redirects are refused, there is a 30 s timeout and a 2 MiB cap. Errors come back as `{message}` or `{error}`.
+
+| Method | Client fn | Body |
+|---|---|---|
+| listAgents | `list_agents` | `{}` → `{agents:[…]}` or `[…]` |
+| sendPrompt | `send_prompt` | `{agentId, prompt, clientNonce, replyToId?}` → `{messageId}` |
+| getAgentTranscriptTail | `transcript_tail` | `{id, limit 1..=200}` → `{entries}` |
+| getAgentThread | `thread` | `{id, rootId}` |
+| createAgent | `create_agent` | `{name, description, title, avatarShape, avatarColor, origin:"user"}` |
+| updateAgent | `update_agent` | `{id, profile:{name, description, title?, avatarShape?, avatarColor?}}` |
+| deleteAgent | `delete_agent` | `{id}` |
+| setAgentNotifyOnUpdates | `set_agent_notify_on_updates` | `{id, isEnabled}` |
+| setAgentHiddenFromSidebar | `set_agent_hidden_from_sidebar` | `{id, isHidden}` |
+| createGroup | `create_group` | `{name, description, memberAgentIds}` (1–6) |
+| setGroupMembers | `set_group_members` | `{id, memberAgentIds}` |
+| getAgentWorkflows | `get_agent_workflows` | `{id}` |
+| importAgentWorkflowText | `import_agent_workflow_text` | `{id, markdown}` (≤100 000 chars) |
+| deleteAgentWorkflow | `delete_agent_workflow` | `{id, workflowId}` |
+| resolveLocalToolPermission | `resolve_local_tool_permission` | `{agentId, entryId, requestId, resolution:"allow-once"\|"deny"}` |
+| resolveAutoReviewApproval | `resolve_auto_review_approval` | `{agentId, entryId, requestId, resolution:"approved"\|"denied"}` |
+| *(any)* | `call_raw` | raw JSON |
+
+**EnsureSandBox:** `ensure_sandbox` / `Client::connect_cursor` send
+`POST {backend}/aiserver.v1.GrokBotService/EnsureSandBox` with body `{}` and headers `connect-protocol-version: 1`,
+`authorization: Bearer <cursor token>`, `x-cursor-client-type: sand`, `x-cursor-client-version: 0.20.0`, `x-sand-box-namespace: prod`.
+The response gives `gatewayUrl|gateway_url`, `gatewayToken|gateway_token`, and `gatewayHeaders|gateway_headers`, or
+`anyrunNetworkToken` (sent as `x-anyrun-network-token`). A client built with a Cursor token re-exchanges once on 401;
+read the new session with `take_refreshed_session()`.
+
+**Errors:** `Error::{Policy, Validation, Http, Transport, TooLarge, InvalidResponse}`. `Error::delivery()` returns
+`Rejected` for policy, validation and 4xx errors, and `Unknown` for 5xx, network and timeout errors, where you should read the transcript before resending.
+
+**Policy:** `Policy::check_gateway` / `check_backend` implement the host allowlist (see the workspace README).
+
+**Transcripts:** `Entry { id, role, text, raw }`, `Entry::is_from_user()` (heuristic), `Entry::approval()` for pending
+approval cards (never approve automatically), and `sanitize_text` to strip terminal escapes.
+
+```rust,no_run
+use grokbot_api::{Client, ClientOptions, SendPrompt};
+# async fn demo() -> grokbot_api::Result<()> {
+let client = Client::connect_cursor("<cursor access token>", ClientOptions::default()).await?;
+let bot = &client.list_agents().await?[0];
+let receipt = client.send_prompt(&SendPrompt::new(&bot.id, "hello")).await?;
+let tail = client.transcript_tail(&bot.id, 40).await?;
+# Ok(()) }
+```
