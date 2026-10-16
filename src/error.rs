@@ -45,6 +45,9 @@ pub enum Error {
     /// Response body exceeded [`crate::MAX_RESPONSE_BYTES`].
     #[error("{method}: gateway response too large (over {limit} bytes)")]
     TooLarge { method: String, limit: usize },
+    /// Reading the desktop app's saved session failed (`desktop-session` feature).
+    #[error("{message}")]
+    Desktop { code: String, message: String },
     /// The response was not the expected shape.
     #[error("{method}: {message}")]
     InvalidResponse { method: String, message: String },

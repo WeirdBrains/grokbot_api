@@ -22,9 +22,13 @@
 //!   `aiserver.v1.GrokBotService/EnsureSandBox`. A client built this way re-exchanges
 //!   automatically when the gateway answers 401.
 //!
+//! - From the desktop app's saved session (opt-in `desktop-session` feature): see [`desktop`].
+//!
 //! Credentials are only ever sent to hosts allowed by [`Policy`].
 
 mod client;
+#[cfg(feature = "desktop-session")]
+pub mod desktop;
 mod error;
 mod policy;
 mod transcript;

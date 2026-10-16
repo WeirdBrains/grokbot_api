@@ -11,6 +11,24 @@ serde_json = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
+# desktop-session only
+base64 = { version = "0.22", optional = true }
+aes = { version = "0.8", optional = true }
+cbc = { version = "0.1", features = ["alloc"], optional = true }
+pbkdf2 = { version = "0.12", default-features = false, optional = true }
+hmac = { version = "0.12", optional = true }
+sha1 = { version = "0.10", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+aes-gcm = { version = "0.10", optional = true }
+
+[features]
+default = []
+# Read and decrypt the Grok Bot desktop app's saved gateway session (Chromium Safe Storage).
+desktop-session = ["dep:base64", "dep:aes", "dep:cbc", "dep:pbkdf2", "dep:hmac", "dep:sha1", "dep:aes-gcm"]
+
 [dev-dependencies]
+aes-gcm = "0.10"
+tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"

@@ -39,8 +39,14 @@ The response gives `gatewayUrl|gateway_url`, `gatewayToken|gateway_token`, and `
 `anyrunNetworkToken` (sent as `x-anyrun-network-token`). A client built with a Cursor token re-exchanges once on 401;
 read the new session with `take_refreshed_session()`.
 
-**Errors:** `Error::{Policy, Validation, Http, Transport, TooLarge, InvalidResponse}`. `Error::delivery()` returns
+**Errors:** `Error::{Policy, Validation, Http, Transport, TooLarge, InvalidResponse, Desktop}`. `Error::delivery()` returns
 `Rejected` for policy, validation and 4xx errors, and `Unknown` for 5xx, network and timeout errors, where you should read the transcript before resending.
+
+**Desktop session (feature `desktop-session`, off by default):** `grokbot_api::desktop` reads the Grok Bot desktop app's
+`gateway-descriptor.json`, mirroring grok-bot-cli's `app-session.js`. It supports v1 and v2 descriptors, Linux v10/v11
+(secret-tool), macOS Keychain and Windows DPAPI with AES-256-GCM. `DesktopConfig::new(platform).load_entry(entry, &policy)`
+returns a policy-checked `Session`. Errors are `Error::Desktop { code, message }`, where `code` is one of `APP_NOT_FOUND`,
+`NOT_SIGNED_IN`, `SECRET_TOOL_MISSING`, `AMBIGUOUS_ENTRIES`, `NO_SUCH_ENTRY`, `DECRYPT_FAILED` and so on. Only call it on an explicit user request.
 
 **Policy:** `Policy::check_gateway` / `check_backend` implement the host allowlist (see the workspace README).
 
