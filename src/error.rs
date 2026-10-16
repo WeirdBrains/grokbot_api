@@ -81,7 +81,11 @@ impl Error {
 mod auth_tests {
     use super::*;
     fn http(status: u16) -> Error {
-        Error::Http { status, method: "listAgents".into(), message: String::new() }
+        Error::Http {
+            status,
+            method: "listAgents".into(),
+            message: String::new(),
+        }
     }
     #[test]
     fn expired_session_417_counts_as_unauthorized() {
