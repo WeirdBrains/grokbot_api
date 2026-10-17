@@ -5,7 +5,7 @@
 [![CI](https://github.com/WeirdBrains/grokbot_api/actions/workflows/ci.yml/badge.svg)](https://github.com/WeirdBrains/grokbot_api/actions/workflows/ci.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](./LICENSE)
 
-**Version 1.0.0** · **Tests:** 117 unit and integration tests and 36 doctests, all passing ·
+**Version 1.1.0** · **Tests:** 117 unit and integration tests and 36 doctests, all passing ·
 **Coverage:** 99% of lines (`cargo llvm-cov --all-features`) · **MSRV:** Rust 1.89
 
 An **unofficial** async Rust client for the Grok Bot gateway: the private API behind the
