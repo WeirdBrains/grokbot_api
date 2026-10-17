@@ -8,16 +8,36 @@
 //!   `GB_ALLOW_LOCAL_GATEWAY=1`. Loopback backends are never allowed outside tests.
 //! - URLs carrying userinfo are always rejected.
 
+/// Environment variable read by [`Policy::from_env`]: `1`, `true` or `yes` allows
+/// loopback gateways (e.g. a local mock server).
 pub const ALLOW_LOCAL_ENV: &str = "GB_ALLOW_LOCAL_GATEWAY";
 
+/// Which URLs may receive credentials.
+///
+/// The default policy only allows the hosted Grok Bot gateway and Cursor backend over
+/// https. Every [`Client`](crate::Client) call re-checks the gateway URL, and
+/// [`ensure_sandbox`](crate::ensure_sandbox) checks both the backend URL and the gateway
+/// URL it gets back. See the `POLICY.md` guide.
+///
+/// ```
+/// use grokbot_api::Policy;
+///
+/// let p = Policy::default();
+/// assert_eq!(p.check_gateway("https://box.us1.cursorvm.com/").unwrap(), "https://box.us1.cursorvm.com");
+/// assert!(p.check_gateway("https://example.com").is_err());
+/// assert!(p.check_backend("https://box.us1.cursorvm.com").is_err()); // never send the Cursor token to a box
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Policy {
+    /// Allow `localhost` / `127.0.0.1` / `::1` gateways over http or https.
     pub allow_local_gateway: bool,
     /// Allow a loopback EnsureSandBox backend. Never set from the environment; for tests only.
     pub allow_local_backend: bool,
 }
 
 impl Policy {
+    /// The default policy, plus loopback gateways when [`ALLOW_LOCAL_ENV`] is `1`/`true`/`yes`.
+    /// The loopback *backend* is never enabled from the environment.
     pub fn from_env() -> Self {
         let v = std::env::var(ALLOW_LOCAL_ENV)
             .unwrap_or_default()
@@ -37,12 +57,19 @@ impl Policy {
         }
     }
 
-    /// Validate a gateway URL; returns it without a trailing slash.
+    /// Validate a gateway URL; returns it trimmed and without a trailing slash.
+    ///
+    /// Allowed: https on `cursor.sh`, `cursor.com`, `*.cursor.sh`, `*.cursor.com`,
+    /// `*.cursorvm.com`; loopback only with [`Policy::allow_local_gateway`]. URLs with
+    /// userinfo are always rejected. The error is a human-readable reason.
     pub fn check_gateway(&self, raw: &str) -> Result<String, String> {
         check(raw, Kind::Gateway, *self)
     }
 
-    /// Validate the EnsureSandBox backend base URL.
+    /// Validate the EnsureSandBox backend base URL (which receives the Cursor access token).
+    ///
+    /// Allowed: https on `cursor.sh`, `cursor.com`, `*.cursor.sh`, `*.cursor.com` only (never
+    /// `*.cursorvm.com`); loopback only with [`Policy::allow_local_backend`].
     pub fn check_backend(&self, raw: &str) -> Result<String, String> {
         check(raw, Kind::Backend, *self)
     }

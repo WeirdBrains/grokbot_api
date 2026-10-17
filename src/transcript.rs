@@ -3,11 +3,15 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// A page of transcript entries (`getAgentTranscriptTail`), a walked history
+/// ([`Client::transcript_history`](crate::Client::transcript_history)) or a thread (`getAgentThread`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Transcript {
+    /// Entries, oldest first.
     pub entries: Vec<Entry>,
     /// Present when more older entries exist; pass as `before_seq` on the next page.
     pub next_before_seq: Option<u64>,
+    /// The raw response (for a walked history: `{"pages": [...]}`).
     pub raw: Value,
 }
 
@@ -29,6 +33,9 @@ impl Transcript {
     }
 }
 
+/// One transcript entry: a user prompt, a bot reply, a tool event, an approval card, ...
+///
+/// The gateway's entry vocabulary is undocumented; [`Entry::raw`] keeps the full record.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Entry {
     /// Source entry id (may be missing).
@@ -37,6 +44,7 @@ pub struct Entry {
     pub role: String,
     /// Best text body (see `entryText` in grok-bot-cli). Not sanitized.
     pub text: String,
+    /// The raw entry.
     pub raw: Value,
 }
 
@@ -101,6 +109,17 @@ fn entry_text(e: &Value) -> String {
 }
 
 impl Entry {
+    /// Parse one raw entry. Never fails; unknown shapes give an empty `text`.
+    ///
+    /// ```
+    /// use grokbot_api::Entry;
+    /// use serde_json::json;
+    ///
+    /// let e = Entry::from_value(&json!({"id": "e2", "kind": "send-message",
+    ///     "message": {"type": "text", "content": "hello"}}));
+    /// assert_eq!((e.role.as_str(), e.text.as_str()), ("send-message", "hello"));
+    /// assert!(!e.is_from_user());
+    /// ```
     pub fn from_value(v: &Value) -> Entry {
         let role = ["role", "kind", "sender", "type"]
             .iter()
@@ -128,6 +147,7 @@ impl Entry {
     }
 }
 
+/// Which resolve method an [`Approval`] needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalKind {
     /// `message.type == "auto-review-approval"` → resolve with `resolveAutoReviewApproval`.
@@ -140,11 +160,15 @@ pub enum ApprovalKind {
 /// Never approve automatically: approvals need an explicit user decision.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Approval {
+    /// The transcript entry carrying the card (`entryId` when resolving).
     pub entry_id: String,
+    /// The card's `requestId`.
     pub request_id: String,
+    /// Which resolve method to call.
     pub kind: ApprovalKind,
     /// reason, command, summary, action, description, target, machineId, surface, workingDirectory (≤2048 chars each).
     pub details: BTreeMap<String, String>,
+    /// Some detail was longer than 2048 characters and was cut.
     pub truncated: bool,
 }
 
@@ -203,6 +227,10 @@ impl Approval {
 
 /// Strip ANSI escape sequences and control characters (except `\n` and `\t`) so
 /// server text cannot drive the terminal.
+///
+/// ```
+/// assert_eq!(grokbot_api::sanitize_text("\u{1b}[31mred\u{1b}[0m\u{7}!"), "red!");
+/// ```
 pub fn sanitize_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut it = s.chars().peekable();

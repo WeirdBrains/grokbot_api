@@ -1,5 +1,7 @@
+//! Request and response types for the gateway methods.
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// Avatar shapes accepted by `createAgent` / `updateAgent`.
 pub const AVATAR_SHAPES: &[&str] = &[
@@ -11,20 +13,52 @@ pub const AVATAR_COLORS: &[&str] = &[
     "black", "brown", "red", "orange", "yellow", "green", "cyan", "blue", "violet", "magenta",
     "gray",
 ];
+/// Most member agents a group may have (`createGroup` / `setGroupMembers`).
 pub const MAX_GROUP_MEMBERS: usize = 6;
-/// Grok Bot truncates workflow (skill) bodies over this many characters.
+/// Grok Bot truncates workflow (skill) bodies over this many characters, so
+/// [`Client::import_agent_workflow_text`](crate::Client::import_agent_workflow_text)
+/// rejects longer input.
 pub const SKILL_MAX_BODY_LENGTH: usize = 100_000;
 
-/// Gateway connection: base URL, bearer token and extra headers.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// A gateway connection: base URL, bearer token and extra headers.
+///
+/// `Debug` output redacts the token and header values.
+///
+/// ```
+/// use grokbot_api::Session;
+///
+/// let s = Session::new("https://box.us1.cursorvm.com", "gateway-token")
+///     .with_headers([("X-Anyrun-Network-Token".to_string(), "net".to_string())].into());
+/// assert!(s.headers.contains_key("x-anyrun-network-token")); // keys are lower-cased
+/// assert!(!format!("{s:?}").contains("gateway-token"));
+/// ```
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct Session {
+    /// Gateway base URL, e.g. `https://<box>.cursorvm.com` (no trailing slash).
     pub gateway_url: String,
+    /// Bearer token sent as `authorization: Bearer <token>`.
     pub gateway_token: String,
     /// Extra headers sent on every call (keys lower-case), e.g. `x-anyrun-network-token`.
     pub headers: BTreeMap<String, String>,
 }
 
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let headers: BTreeMap<&str, &str> = self
+            .headers
+            .keys()
+            .map(|k| (k.as_str(), "<redacted>"))
+            .collect();
+        f.debug_struct("Session")
+            .field("gateway_url", &self.gateway_url)
+            .field("gateway_token", &"<redacted>")
+            .field("headers", &headers)
+            .finish()
+    }
+}
+
 impl Session {
+    /// A session with no extra headers.
     pub fn new(gateway_url: impl Into<String>, gateway_token: impl Into<String>) -> Self {
         Self {
             gateway_url: gateway_url.into(),
@@ -33,6 +67,7 @@ impl Session {
         }
     }
 
+    /// Replace the extra headers. Keys are lower-cased and empty values dropped.
     pub fn with_headers(mut self, headers: BTreeMap<String, String>) -> Self {
         self.headers = normalize_headers(headers);
         self
@@ -51,16 +86,23 @@ pub(crate) fn normalize_headers<I: IntoIterator<Item = (String, String)>>(
 /// A bot or group as returned by `listAgents`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Agent {
+    /// Agent id (`id`, or `agentId`).
     pub id: String,
+    /// Display name (may be empty).
     pub name: String,
+    /// Title (may be empty).
     pub title: String,
+    /// Description (may be empty).
     pub description: String,
+    /// One of [`AVATAR_SHAPES`], or empty.
     pub avatar_shape: String,
+    /// One of [`AVATAR_COLORS`], or empty.
     pub avatar_color: String,
     /// `notifyOnUpdatesEnabled` / `notifyOnAgentUpdates`, when present.
     pub notify_on_updates: Option<bool>,
     /// `isHiddenFromSidebar` / `hiddenFromSidebar`, when present.
     pub hidden_from_sidebar: Option<bool>,
+    /// `isGroup`, or inferred from a non-empty member list.
     pub is_group: bool,
     /// `memberIds` / `memberAgentIds`.
     pub member_ids: Vec<String>,
@@ -74,7 +116,16 @@ fn s(v: &Value, k: &str) -> Option<String> {
 }
 
 impl Agent {
-    /// Parse one agent record (mirrors grok-bot-cli `asRecord`). Returns None without an id.
+    /// Parse one agent record (mirrors grok-bot-cli `asRecord`). Returns `None` without an id.
+    ///
+    /// ```
+    /// use grokbot_api::Agent;
+    /// use serde_json::json;
+    ///
+    /// let a = Agent::from_value(&json!({"agentId": "a1", "title": "Helper", "memberIds": ["b"]})).unwrap();
+    /// assert_eq!((a.id.as_str(), a.display_name(), a.is_group), ("a1", "Helper", true));
+    /// assert!(Agent::from_value(&json!({"name": "no id"})).is_none());
+    /// ```
     pub fn from_value(v: &Value) -> Option<Agent> {
         let id = s(v, "id").or_else(|| s(v, "agentId"))?;
         let members = v
@@ -137,18 +188,29 @@ impl Agent {
     }
 }
 
-/// `sendPrompt` request.
+/// A `sendPrompt` request.
+///
+/// ```
+/// use grokbot_api::SendPrompt;
+///
+/// let mut req = SendPrompt::new("agent-id", "hello");
+/// req.client_nonce = Some("my-idempotency-key".into()); // optional; a UUID is generated otherwise
+/// ```
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SendPrompt {
+    /// The bot or group to send to.
     pub agent_id: String,
+    /// The prompt text (must not be empty).
     pub prompt: String,
-    /// Idempotency nonce; a v4 UUID is generated when None.
+    /// Idempotency nonce; a v4 UUID is generated when `None`. Reuse it to ask
+    /// [`Client::prompt_acceptance_status`](crate::Client::prompt_acceptance_status) or to resend safely.
     pub client_nonce: Option<String>,
     /// Reply in a thread rooted at this entry id.
     pub reply_to_id: Option<String>,
 }
 
 impl SendPrompt {
+    /// A prompt to `agent_id` with a generated nonce and no thread.
     pub fn new(agent_id: impl Into<String>, prompt: impl Into<String>) -> Self {
         Self {
             agent_id: agent_id.into(),
@@ -158,52 +220,76 @@ impl SendPrompt {
     }
 }
 
-/// `sendPrompt` receipt. Only a `messageId` counts as accepted.
+/// The receipt for a `sendPrompt` call. Replies arrive later in the transcript.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SendReceipt {
+    /// The message id: the gateway's `messageId`, or the client nonce when the gateway
+    /// answers `{accepted: true}`. `None` when delivery is unknown.
     pub message_id: Option<String>,
+    /// The nonce that was sent (generated if the request had none).
     pub client_nonce: String,
+    /// [`Delivery::Accepted`](crate::Delivery::Accepted), or
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) for a 2xx without a recognisable receipt.
     pub delivery: crate::Delivery,
+    /// The raw response body.
     pub raw: Value,
 }
 
-/// `createAgent` request (sent with `origin: "user"`).
+/// A `createAgent` request (sent with `origin: "user"`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CreateAgent {
+    /// Name (required, must not be blank).
     pub name: String,
+    /// Description.
     pub description: String,
+    /// Title.
     pub title: String,
+    /// One of [`AVATAR_SHAPES`], or empty for the server default.
     pub avatar_shape: String,
+    /// One of [`AVATAR_COLORS`], or empty for the server default.
     pub avatar_color: String,
 }
 
-/// `updateAgent` profile. `name` and `description` are always sent.
+/// An `updateAgent` profile. `name` and `description` are always sent; `None` fields are left unchanged.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AgentProfile {
+    /// Name (required, must not be blank; trimmed before sending).
     pub name: String,
+    /// Description.
     pub description: String,
+    /// New title.
     pub title: Option<String>,
+    /// New avatar shape (one of [`AVATAR_SHAPES`]).
     pub avatar_shape: Option<String>,
+    /// New avatar color (one of [`AVATAR_COLORS`]).
     pub avatar_color: Option<String>,
 }
 
-/// `createGroup` request.
+/// A `createGroup` request.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CreateGroup {
+    /// Group name.
     pub name: String,
+    /// Group description.
     pub description: String,
+    /// 1 to [`MAX_GROUP_MEMBERS`] member agent ids (duplicates and empty ids are dropped).
     pub member_agent_ids: Vec<String>,
 }
 
 /// A workflow ("skill") from `getAgentWorkflows`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Workflow {
+    /// Workflow id (numeric ids are converted to strings).
     pub id: String,
+    /// Name.
     pub name: String,
+    /// Description.
     pub description: String,
-    /// `workflow` (library), `managed`, `plugin`, or `automation`.
+    /// `workflow` (library, the default), `managed`, `plugin`, or `automation`.
     pub source: String,
+    /// `sourceRef`, when present.
     pub source_ref: Option<String>,
+    /// `pluginId`, for plugin workflows.
     pub plugin_id: Option<String>,
 }
 
@@ -233,28 +319,35 @@ impl Workflow {
     }
 }
 
+/// A workflow the server declined to import.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SkippedImport {
+    /// The server's reason (`"rejected"` if none was given).
     pub reason: String,
 }
 
-/// `importAgentWorkflowText` result.
+/// The result of `importAgentWorkflowText`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImportResult {
     /// The library after import, if echoed.
     pub workflows: Vec<Workflow>,
+    /// Workflows that were imported.
     pub imported: Vec<Workflow>,
+    /// Workflows that were skipped, with reasons.
     pub skipped: Vec<SkippedImport>,
 }
 
-/// `resolveLocalToolPermission` resolution.
+/// A `resolveLocalToolPermission` decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalToolResolution {
+    /// Allow this one tool call (`"allow-once"`).
     AllowOnce,
+    /// Deny it (`"deny"`).
     Deny,
 }
 
 impl LocalToolResolution {
+    /// The wire value: `"allow-once"` or `"deny"`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AllowOnce => "allow-once",
@@ -263,14 +356,17 @@ impl LocalToolResolution {
     }
 }
 
-/// `resolveAutoReviewApproval` resolution.
+/// A `resolveAutoReviewApproval` decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoReviewResolution {
+    /// Approve (`"approved"`).
     Approved,
+    /// Deny (`"denied"`).
     Denied,
 }
 
 impl AutoReviewResolution {
+    /// The wire value: `"approved"` or `"denied"`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Approved => "approved",
@@ -285,7 +381,9 @@ impl AutoReviewResolution {
 pub struct TeamAgent {
     /// Gateway agent id (`agentId`); equals the gateway `listAgents` id for your own agents.
     pub agent_id: String,
+    /// Name.
     pub name: String,
+    /// Description.
     pub description: String,
     /// False for a team agent owned by someone else.
     pub viewer_is_owner: bool,
@@ -293,12 +391,25 @@ pub struct TeamAgent {
     pub team_visible: bool,
     /// Your session with a shared agent; sent as `sessionId` to the gateway.
     pub viewer_session_id: Option<String>,
+    /// The owner's display name, for shared agents.
     pub owner_display_name: Option<String>,
+    /// Kind is `GROK_BOT_AGENT_KIND_ROOM`.
     pub is_room: bool,
 }
 
 impl TeamAgent {
-    /// Parse a `ListGrokBotTeamAgentsResponse` (`{entries: [{agent: {...}}]}`).
+    /// Parse a `ListGrokBotTeamAgentsResponse` (`{entries: [{agent: {...}}]}`). Entries
+    /// without an `agentId` are skipped.
+    ///
+    /// ```
+    /// use grokbot_api::TeamAgent;
+    /// use serde_json::json;
+    ///
+    /// let list = TeamAgent::list(&json!({"entries": [{"agent": {
+    ///     "agentId": "chomp", "name": "Chomp", "viewerIsOwner": false,
+    ///     "visibility": "GROK_BOT_AGENT_VISIBILITY_TEAM", "viewerSessionId": "vs1"}}]}));
+    /// assert!(!list[0].viewer_is_owner && list[0].team_visible);
+    /// ```
     pub fn list(v: &Value) -> Vec<TeamAgent> {
         let s = |a: &Value, k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let opt = |a: &Value, k: &str| {

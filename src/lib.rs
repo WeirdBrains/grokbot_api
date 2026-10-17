@@ -1,38 +1,18 @@
-//! # grokbot_api
-//!
-//! **Unofficial** async client for the Grok Bot gateway.
-//!
-//! The gateway is private and **undocumented**. Everything here was reverse-engineered
-//! from [grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli)
-//! (`src/core/gateway.js`, `headers.js`, `url-policy.js`, `transcript.js`) and may change
-//! without notice.
-//!
-//! ## Protocol
-//! Every call is `POST {gateway_url}/api/<method>` with a JSON body and headers
-//! `content-type: application/json`, `authorization: Bearer <gateway_token>`, plus any
-//! extra session headers. Redirects are refused, there is a 30 s timeout and a 2 MiB
-//! response cap. Errors come back as `{ "message" }` or `{ "error" }`.
-//!
-//! There is no streaming. After [`Client::send_prompt`] (which only returns a receipt),
-//! poll [`Client::transcript_tail`] for replies.
-//!
-//! ## Getting a session
-//! - Directly: a gateway URL + gateway token ([`Session::new`]).
-//! - From a Cursor access token: [`ensure_sandbox`] / [`Client::connect_cursor`] call
-//!   `aiserver.v1.GrokBotService/EnsureSandBox`. A client built this way re-exchanges
-//!   automatically when the gateway answers 401.
-//!
-//! - From the desktop app's saved session (opt-in `desktop-session` feature): see [`desktop`].
-//!
-//! Credentials are only ever sent to hosts allowed by [`Policy`].
+#![doc = include_str!("../README.md")]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 mod client;
 #[cfg(feature = "desktop-session")]
+#[cfg_attr(docsrs, doc(cfg(feature = "desktop-session")))]
 pub mod desktop;
 mod error;
 mod policy;
 mod transcript;
 mod types;
+
+pub mod guide;
 
 pub use client::{
     AcceptanceStatus, Client, ClientOptions, DEFAULT_BACKEND_BASE, DEFAULT_CLIENT_TYPE,

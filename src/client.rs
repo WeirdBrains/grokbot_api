@@ -1,3 +1,4 @@
+//! The gateway client, EnsureSandBox, and Cursor backend calls.
 use crate::error::{Delivery, Error, Result};
 use crate::policy::Policy;
 use crate::transcript::Transcript;
@@ -22,12 +23,28 @@ pub const DEFAULT_CLIENT_TYPE: &str = "sand";
 /// Default `x-sand-box-namespace` for production EnsureSandBox.
 pub const DEFAULT_SANDBOX_NAMESPACE: &str = "prod";
 
+/// Settings for [`Client`], [`ensure_sandbox`] and [`grokbot_service_call`].
+///
+/// ```
+/// use grokbot_api::{ClientOptions, Policy};
+/// use std::time::Duration;
+///
+/// let opts = ClientOptions {
+///     timeout: Duration::from_secs(10),
+///     client_version: "0.70.2".into(),
+///     ..ClientOptions::default()
+/// };
+/// assert_eq!(opts.policy, Policy::from_env());
+/// ```
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
+    /// Which URLs may receive credentials (default: [`Policy::from_env`]).
     pub policy: Policy,
     /// Cursor backend base URL for EnsureSandBox (must pass [`Policy::check_backend`]).
     pub backend_base: String,
+    /// Per-request deadline (default [`TIMEOUT`]).
     pub timeout: Duration,
+    /// Response body cap in bytes (default [`MAX_RESPONSE_BYTES`]).
     pub max_response_bytes: usize,
     /// Sent as `x-cursor-client-version` on EnsureSandBox.
     pub client_version: String,
@@ -288,12 +305,42 @@ struct State {
     agent_sessions: std::collections::HashMap<String, String>,
 }
 
-/// Async gateway client. Cheap to share behind an `Arc`; methods take `&self`.
+/// Async gateway client. Share it behind an `Arc`; methods take `&self`.
+///
+/// Every call is `POST {gateway_url}/api/<method>` with the session's bearer token and
+/// headers, after re-checking the URL against the [`Policy`]. A client created with a
+/// Cursor access token ([`Client::connect_cursor`] / [`Client::with_cursor_token`])
+/// re-runs EnsureSandBox once and retries when the gateway answers 401 or 417; persist
+/// the new session from [`Client::take_refreshed_session`].
+///
+/// ```no_run
+/// use grokbot_api::{Client, ClientOptions, Session};
+///
+/// # async fn demo() -> grokbot_api::Result<()> {
+/// let client = Client::new(
+///     Session::new("https://box.us1.cursorvm.com", "gateway-token"),
+///     ClientOptions::default(),
+/// )?;
+/// for agent in client.list_agents().await? {
+///     println!("{} {}", agent.id, agent.display_name());
+/// }
+/// # Ok(()) }
+/// ```
 pub struct Client {
     http: reqwest::Client,
     opts: ClientOptions,
     state: RwLock<State>,
     refreshed: Mutex<Option<Session>>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let st = self.state.read().unwrap();
+        f.debug_struct("Client")
+            .field("gateway_url", &st.session.gateway_url)
+            .field("has_cursor_token", &st.cursor_token.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Client {
@@ -332,6 +379,7 @@ impl Client {
         Self::with_cursor_token(session, access_token, opts)
     }
 
+    /// The current session (it changes after a 401/417 re-exchange).
     pub fn session(&self) -> Session {
         self.state.read().unwrap().session.clone()
     }
@@ -383,7 +431,8 @@ impl Client {
         Ok(data)
     }
 
-    /// Call any gateway method with a raw JSON body. Handles 401 re-exchange.
+    /// Call any gateway method with a raw JSON body and return the raw JSON response.
+    /// Handles the 401/417 re-exchange like the typed methods.
     pub async fn call_raw(&self, method: &str, body: Value) -> Result<Value> {
         let (session, cursor) = {
             let st = self.state.read().unwrap();
@@ -510,10 +559,9 @@ impl Client {
 
     // ------------------------------------------------------------------ chat
 
-    /// `sendPrompt {agentId, prompt, clientNonce, replyToId?}` → receipt only.
-    ///
-    /// On error use [`Error::delivery`]: `Unknown` means read the transcript before resending.
-    /// Route calls for `agent_id` through `session_id` (a shared agent's viewer session).
+    /// Route calls for `agent_id` through `session_id` (a shared agent's viewer session),
+    /// sent as `sessionId` on `sendPrompt`, `promptAcceptanceStatus` and
+    /// `getAgentTranscriptTail`. [`Client::list_team_agents`] sets this automatically.
     pub fn set_agent_session(&self, agent_id: &str, session_id: &str) {
         self.state
             .write()
@@ -557,6 +605,13 @@ impl Client {
         Ok(Some(list))
     }
 
+    /// `sendPrompt {agentId, prompt, clientNonce, replyToId?, sessionId?}` → receipt only.
+    ///
+    /// Replies arrive later: poll [`Client::transcript_tail`]. On error use
+    /// [`Error::delivery`]: `Unknown` means the prompt may have landed, so check the
+    /// transcript or [`Client::prompt_acceptance_status`] before resending. A gateway
+    /// refusal (`{status: "refused"}` / `{accepted: false}`) is returned as
+    /// [`Error::Http`] with status 422.
     pub async fn send_prompt(&self, req: &SendPrompt) -> Result<SendReceipt> {
         if req.prompt.is_empty() {
             return Err(Error::Validation("Prompt is empty.".into()));
@@ -840,6 +895,16 @@ pub enum AcceptanceStatus {
 }
 
 impl AcceptanceStatus {
+    /// Map a `promptAcceptanceStatus` response (optionally wrapped in `{status, value}`).
+    ///
+    /// ```
+    /// use grokbot_api::AcceptanceStatus;
+    /// use serde_json::json;
+    ///
+    /// let s = AcceptanceStatus::from_value(&json!({"outcome": "found",
+    ///     "record": {"status": "rejected", "rejectionCode": "too_long"}}));
+    /// assert_eq!(s, AcceptanceStatus::Rejected(Some("too_long".into())));
+    /// ```
     pub fn from_value(raw: &Value) -> Self {
         let v = raw.get("value").filter(|v| v.is_object()).unwrap_or(raw);
         match v.get("outcome").and_then(Value::as_str) {

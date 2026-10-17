@@ -53,7 +53,7 @@ returns a policy-checked `Session`. `load_credential` prefers the descriptor and
 With the `desktop-session` feature, `desktop::detect_app_version` reads the installed app's `package.json` /
 `app.asar` (and `desktop-status.json` as a fallback).
 
-**Policy:** `Policy::check_gateway` / `check_backend` implement the host allowlist (see the workspace README).
+**Policy:** `Policy::check_gateway` / `check_backend` implement the host allowlist (see `Policy` docs).
 
 **Transcripts:** `Entry { id, role, text, raw }`, `Entry::is_from_user()` (heuristic), `Entry::approval()` for pending
 approval cards (never approve automatically), and `sanitize_text` to strip terminal escapes.
@@ -63,7 +63,7 @@ use grokbot_api::{Client, ClientOptions, SendPrompt};
 # async fn demo() -> grokbot_api::Result<()> {
 let client = Client::connect_cursor("<cursor access token>", ClientOptions::default()).await?;
 let bot = &client.list_agents().await?[0];
-let receipt = client.send_prompt(&SendPrompt::new(&bot.id, "hello")).await?;
-let tail = client.transcript_tail(&bot.id, 40).await?;
+let _receipt = client.send_prompt(&SendPrompt::new(&bot.id, "hello")).await?;
+let _tail = client.transcript_tail(&bot.id, 40, None).await?;
 # Ok(()) }
 ```
