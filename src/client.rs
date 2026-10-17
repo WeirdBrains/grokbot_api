@@ -16,7 +16,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 /// Default `x-cursor-client-version` (Grok Bot 0.70.x era). Prefer detecting the
-/// installed desktop app version via [`crate::desktop::detect_app_version`].
+/// installed desktop app version via `desktop::detect_app_version` (`desktop-session` feature).
 pub const DEFAULT_CLIENT_VERSION: &str = "0.70.2";
 /// Default `x-cursor-client-type` (matches the desktop app's `SAND_CLIENT_TYPE`).
 pub const DEFAULT_CLIENT_TYPE: &str = "sand";
