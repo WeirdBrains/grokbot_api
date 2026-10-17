@@ -6,10 +6,11 @@ All notable changes to this crate are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.1.0]
+## [1.0.0] - 2026-10-17
 
 First standalone release. The crate was previously developed inside the
 [grokbot-tui](https://github.com/m3talsmith/gb) workspace; that history is preserved.
+Requires Rust 1.89 or newer.
 
 ### Added
 
@@ -35,5 +36,5 @@ First standalone release. The crate was previously developed inside the
 - Topic guides (`*.md`, also on docs.rs under `guide`), runnable examples, and a mock-server
   test suite.
 
-[Unreleased]: https://github.com/WeirdBrains/grokbot_api/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/WeirdBrains/grokbot_api/releases/tag/v0.1.0
+[Unreleased]: https://github.com/WeirdBrains/grokbot_api/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/WeirdBrains/grokbot_api/releases/tag/v1.0.0

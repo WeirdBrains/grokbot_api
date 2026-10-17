@@ -7,7 +7,7 @@ they don't have to paste a token.
 
 ```toml
 [dependencies]
-grokbot_api = { version = "0.1", features = ["desktop-session"] }
+grokbot_api = { version = "1", features = ["desktop-session"] }
 ```
 
 > **Privacy:** this reads and decrypts the user's saved credentials. Only call it when the

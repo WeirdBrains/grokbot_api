@@ -5,7 +5,7 @@
 [![CI](https://github.com/WeirdBrains/grokbot_api/actions/workflows/ci.yml/badge.svg)](https://github.com/WeirdBrains/grokbot_api/actions/workflows/ci.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](./LICENSE)
 
-**Version 0.1.0** · **Tests:** 117 unit and integration tests and 36 doctests, all passing ·
+**Version 1.0.0** · **Tests:** 117 unit and integration tests and 36 doctests, all passing ·
 **Coverage:** 99% of lines (`cargo llvm-cov --all-features`) · **MSRV:** Rust 1.89
 
 An **unofficial** async Rust client for the Grok Bot gateway: the private API behind the
@@ -29,11 +29,11 @@ It gives you typed calls for every known gateway method, plus the pieces needed 
 
 ```toml
 [dependencies]
-grokbot_api = "0.1"
+grokbot_api = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Optional: read the Grok Bot desktop app's saved session.
-# grokbot_api = { version = "0.1", features = ["desktop-session"] }
+# grokbot_api = { version = "1", features = ["desktop-session"] }
 ```
 
 Or `cargo add grokbot_api tokio --features tokio/macros,tokio/rt-multi-thread`.
