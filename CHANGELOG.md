@@ -33,6 +33,9 @@ Requires Rust 1.89 or newer.
 - Optional `desktop-session` feature to read the Grok Bot desktop app's saved session
   (Linux, macOS, Windows), including `DesktopConfig::keychain_program` and app version
   detection.
+- Environment variables: `GROKBOT_ALLOW_LOCAL_GATEWAY` (opt in to loopback gateways) and
+  `GROKBOT_APP_DIR` / `GROKBOT_INSTALL_DIR` (desktop app install directory override).
+  The in-workspace versions were named `GB_ALLOW_LOCAL_GATEWAY` and `GB_GROKBOT_APP_DIR`.
 - Topic guides (`*.md`, also on docs.rs under `guide`), runnable examples, and a mock-server
   test suite.
 

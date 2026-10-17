@@ -5,12 +5,12 @@
 //! - Backend (EnsureSandBox, receives the Cursor access token): https on `*.cursor.sh` / `*.cursor.com`
 //!   only, never `*.cursorvm.com`.
 //! - Loopback gateways (`localhost`, `127.0.0.1`, `::1`, http or https) only when
-//!   `GB_ALLOW_LOCAL_GATEWAY=1`. Loopback backends are never allowed outside tests.
+//!   `GROKBOT_ALLOW_LOCAL_GATEWAY=1`. Loopback backends are never allowed outside tests.
 //! - URLs carrying userinfo are always rejected.
 
 /// Environment variable read by [`Policy::from_env`]: `1`, `true` or `yes` allows
 /// loopback gateways (e.g. a local mock server).
-pub const ALLOW_LOCAL_ENV: &str = "GB_ALLOW_LOCAL_GATEWAY";
+pub const ALLOW_LOCAL_ENV: &str = "GROKBOT_ALLOW_LOCAL_GATEWAY";
 
 /// Which URLs may receive credentials.
 ///

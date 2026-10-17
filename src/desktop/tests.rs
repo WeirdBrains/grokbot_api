@@ -233,10 +233,14 @@ fn ambiguous_entries_need_a_choice() {
         os_password: Some("p".into()),
         keychain_program: None,
     };
-    assert!(matches!(
-        cfg.load_entry(None, &Policy::default()),
-        Err(Error::Desktop { .. })
-    ));
+    let e = cfg.load_entry(None, &Policy::default()).unwrap_err();
+    let msg = e.to_string();
+    assert!(matches!(&e, Error::Desktop { code, .. } if code == "AMBIGUOUS_ENTRIES"));
+    assert!(
+        msg.contains("home") && msg.contains("Specify which one"),
+        "{msg}"
+    );
+    assert!(!msg.contains('/'), "no app-specific commands: {msg}");
     assert_eq!(
         cfg.load_entry(Some("home"), &Policy::default())
             .unwrap()
@@ -346,10 +350,14 @@ fn sand_secrets_multi_needs_choice_by_number() {
     assert_eq!(list.len(), 2);
     assert!(list[0].label.starts_with("1) "));
     assert!(list[1].active);
-    assert!(matches!(
-        cfg.load_credential(None, &Policy::default()),
-        Err(Error::Desktop { code, .. }) if code == "AMBIGUOUS_ENTRIES"
-    ));
+    let e = cfg.load_credential(None, &Policy::default()).unwrap_err();
+    let msg = e.to_string();
+    assert!(matches!(&e, Error::Desktop { code, .. } if code == "AMBIGUOUS_ENTRIES"));
+    assert!(
+        msg.contains("(active)") && msg.contains("unique key prefix"),
+        "{msg}"
+    );
+    assert!(!msg.contains('/'), "no app-specific commands: {msg}");
     match cfg.load_credential(Some("2"), &Policy::default()).unwrap() {
         DesktopCredential::CursorToken(t) => assert_eq!(t, "tok-Z"),
         _ => panic!("expected CursorToken"),
@@ -446,7 +454,7 @@ fn detect_app_version_from_unpacked_package_json() {
     .unwrap();
     let install_s = install.to_string_lossy().into_owned();
     let env = move |k: &str| match k {
-        "GB_GROKBOT_APP_DIR" => Some(install_s.clone()),
+        "GROKBOT_APP_DIR" => Some(install_s.clone()),
         _ => None,
     };
     let v = detect_app_version(Platform::Linux, dir.path(), &env);
@@ -948,10 +956,7 @@ fn install_dir_override_must_be_a_directory() {
     std::fs::write(&file, "").unwrap();
     let inst = dir.path().join("inst");
     std::fs::create_dir(&inst).unwrap();
-    let env = env_map(&[
-        ("GB_GROKBOT_APP_DIR", &file),
-        ("GROKBOT_INSTALL_DIR", &inst),
-    ]);
+    let env = env_map(&[("GROKBOT_APP_DIR", &file), ("GROKBOT_INSTALL_DIR", &inst)]);
     assert_eq!(find_install_dir(Platform::Macos, &env), Some(inst));
 }
 

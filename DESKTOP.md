@@ -106,7 +106,7 @@ arguments and must print the password on stdout.
 installed app's version, e.g. `"0.70.2"`, for `ClientOptions::client_version`.
 
 It finds the install directory with `find_install_dir`:
-- `GB_GROKBOT_APP_DIR` or `GROKBOT_INSTALL_DIR` if set to a directory;
+- `GROKBOT_APP_DIR` or `GROKBOT_INSTALL_DIR` if set to a directory;
 - otherwise the usual install locations:
   - Linux: `~/.local/share/grok-bot`, `/opt/Grok Bot`, `/usr/lib/grok-bot`, the
     `/bin/grok-bot` launcher, and `grok-bot.desktop` entries.

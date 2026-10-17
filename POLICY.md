@@ -39,7 +39,7 @@ use grokbot_api::Policy;
 // Default: hosted endpoints only.
 assert!(Policy::default().check_gateway("http://localhost:8080").is_err());
 
-// Environment opt-in for the gateway only: GB_ALLOW_LOCAL_GATEWAY=1 (or true / yes).
+// Environment opt-in for the gateway only: GROKBOT_ALLOW_LOCAL_GATEWAY=1 (or true / yes).
 let from_env = Policy::from_env();
 assert!(!from_env.allow_local_backend); // never enabled from the environment
 

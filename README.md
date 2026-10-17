@@ -98,7 +98,7 @@ offline against a mock server.
 | Guide | What it covers |
 |---|---|
 | [Sessions and authentication](SESSIONS.md) | Gateway sessions, EnsureSandBox, client identity, 401/417 re-authentication, `ClientOptions` |
-| [Credential policy](POLICY.md) | The host allowlist, loopback gateways, `GB_ALLOW_LOCAL_GATEWAY` |
+| [Credential policy](POLICY.md) | The host allowlist, loopback gateways, `GROKBOT_ALLOW_LOCAL_GATEWAY` |
 | [Agents, groups and team agents](AGENTS.md) | Listing, creating, updating and deleting bots; groups; team bots shared with you |
 | [Sending prompts and delivery](MESSAGING.md) | `send_prompt`, nonces, `Delivery`, `promptAcceptanceStatus`, waiting for replies |
 | [Transcripts](TRANSCRIPTS.md) | Tail pages, `beforeSeq` paging, full history, threads, entry parsing, sanitizing |

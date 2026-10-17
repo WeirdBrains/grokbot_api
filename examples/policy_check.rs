@@ -17,7 +17,7 @@ fn main() {
     } else {
         urls
     };
-    // Honors GB_ALLOW_LOCAL_GATEWAY=1 for loopback gateways.
+    // Honors GROKBOT_ALLOW_LOCAL_GATEWAY=1 for loopback gateways.
     let policy = Policy::from_env();
     for url in urls {
         let show = |r: Result<String, String>| match r {

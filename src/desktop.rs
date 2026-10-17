@@ -471,7 +471,7 @@ impl DesktopConfig {
                 return Err(desktop_err(
                     "AMBIGUOUS_ENTRIES",
                     format!(
-                        "The desktop app has several saved sessions: {names}. Choose one with /login desktop <name>."
+                        "The desktop app has several saved sessions ({names}). Specify which one to load by its entry name."
                     ),
                 ));
             }
@@ -586,7 +586,7 @@ impl DesktopConfig {
                 return Err(desktop_err(
                     "AMBIGUOUS_ENTRIES",
                     format!(
-                        "The desktop app has several Cursor accounts: {}. Choose one with /login desktop <number> (tip: /account add <alias> first so each gets its own gb account).",
+                        "The desktop app has several Cursor accounts ({}). Specify which one to use by its number, its full account key, or a unique key prefix of at least 4 characters.",
                         listing()
                     ),
                 ));
@@ -867,14 +867,14 @@ pub type AppVersion = String;
 
 /// Locate the Grok Bot desktop install directory for this platform, if present.
 ///
-/// `GB_GROKBOT_APP_DIR` or `GROKBOT_INSTALL_DIR` (looked up through `env`) wins when it
+/// `GROKBOT_APP_DIR` or `GROKBOT_INSTALL_DIR` (looked up through `env`) wins when it
 /// names a directory; otherwise the platform's usual install locations are tried.
 pub fn find_install_dir(
     platform: Platform,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Option<PathBuf> {
     // Highest priority: explicit override (also used by tests).
-    for key in ["GB_GROKBOT_APP_DIR", "GROKBOT_INSTALL_DIR"] {
+    for key in ["GROKBOT_APP_DIR", "GROKBOT_INSTALL_DIR"] {
         if let Some(p) = env(key).filter(|s| !s.is_empty()) {
             let pb = PathBuf::from(p);
             if pb.is_dir() {
