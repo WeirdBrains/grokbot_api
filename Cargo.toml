@@ -1,12 +1,23 @@
 [package]
 name = "grokbot_api"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-authors.workspace = true
-homepage.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "BSD-3-Clause"
+authors = ["Michael Christenson II <m3talsmith@gmail.com>"]
 description = "Unofficial async client for the (undocumented) Grok Bot gateway API"
+# TODO(confirm): no remote is set yet; this is the expected location.
+repository = "https://github.com/WeirdBrains/grokbot_api"
+homepage = "https://github.com/WeirdBrains/grokbot_api"
+documentation = "https://docs.rs/grokbot_api"
+readme = "README.md"
+keywords = ["grok", "grokbot", "api-client", "gateway", "async"]
+categories = ["api-bindings", "web-programming::http-client", "asynchronous"]
+include = ["/src", "/tests", "/examples", "/*.md", "/LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -36,6 +47,3 @@ aes-gcm = "0.10"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
-
-[package.metadata.dist]
-dist = false
