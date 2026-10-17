@@ -1,7 +1,7 @@
 //! Read and decrypt the Grok Bot **desktop app's** saved gateway session.
 //!
-//! Enabled by the `desktop-session` feature. This is opt-in: nothing here runs unless the
-//! user explicitly asks gb to read the desktop session (`/login desktop`).
+//! Enabled by the `desktop-session` feature. Nothing here runs unless you call it; only
+//! read the desktop session when the user explicitly asks you to.
 //!
 //! Mirrors grok-bot-cli's `src/core/app-session.js`. The app stores
 //! `gateway-descriptor.json` in its data dir; the payload is encrypted with the Chromium
@@ -150,7 +150,7 @@ type SandAccountsRaw = (String, Vec<(String, serde_json::Map<String, Value>)>);
 pub struct SandAccount {
     /// The opaque account id used as the stored entry key.
     pub key: String,
-    /// A human label (the account email when available, else the key).
+    /// A display label, `"<n>) <first 8 key characters>…"`. Nothing is decrypted to build it.
     pub label: String,
     /// Whether this is the app's active account.
     pub active: bool,
@@ -661,7 +661,7 @@ impl DesktopConfig {
     }
 
     /// Resolve a desktop credential: `gateway-descriptor.json` first, then the
-    /// `sand-secrets.json` Cursor-token fallback. Only called from `/login desktop`.
+    /// `sand-secrets.json` Cursor-token fallback. Call this only on an explicit user request.
     pub fn load_credential(
         &self,
         key: Option<&str>,
