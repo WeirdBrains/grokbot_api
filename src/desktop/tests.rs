@@ -6,11 +6,11 @@ fn encrypt_cbc(clear: &str, password: &str, platform: Platform, prefix: &str) ->
     use aes::Aes128;
     use base64::Engine;
     use cbc::Encryptor;
-    use cbc::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+    use cbc::cipher::{BlockModeEncrypt, KeyIvInit, block_padding::Pkcs7};
     let key = safe_storage_key(password, platform);
     let iv = [0x20u8; 16];
     let ct = Encryptor::<Aes128>::new(&key.into(), &iv.into())
-        .encrypt_padded_vec_mut::<Pkcs7>(clear.as_bytes());
+        .encrypt_padded_vec::<Pkcs7>(clear.as_bytes());
     let mut out = prefix.as_bytes().to_vec();
     out.extend_from_slice(&ct);
     base64::engine::general_purpose::STANDARD.encode(out)
@@ -93,7 +93,7 @@ fn windows_v10_gcm_roundtrip() {
     let nonce = [1u8; 12];
     let ct = cipher
         .encrypt(
-            Nonce::from_slice(&nonce),
+            &Nonce::try_from(&nonce[..]).unwrap(),
             Payload {
                 msg: inner("https://box.cursorvm.com").as_bytes(),
                 aad: b"",
@@ -503,10 +503,10 @@ fn encrypt_bytes(clear: &[u8], password: &str, platform: Platform, prefix: &str)
     use aes::Aes128;
     use base64::Engine;
     use cbc::Encryptor;
-    use cbc::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+    use cbc::cipher::{BlockModeEncrypt, KeyIvInit, block_padding::Pkcs7};
     let key = safe_storage_key(password, platform);
     let ct = Encryptor::<Aes128>::new(&key.into(), &[0x20u8; 16].into())
-        .encrypt_padded_vec_mut::<Pkcs7>(clear);
+        .encrypt_padded_vec::<Pkcs7>(clear);
     let mut out = prefix.as_bytes().to_vec();
     out.extend_from_slice(&ct);
     base64::engine::general_purpose::STANDARD.encode(out)
@@ -662,7 +662,7 @@ fn windows_decrypt_errors() {
     let key = [9u8; 32];
     let ct = Aes256Gcm::new_from_slice(&key)
         .unwrap()
-        .encrypt(Nonce::from_slice(&[2u8; 12]), &[0xffu8, 0xfe][..])
+        .encrypt(&Nonce::from([2u8; 12]), &[0xffu8, 0xfe][..])
         .unwrap();
     let mut blob = b"v10".to_vec();
     blob.extend_from_slice(&[2u8; 12]);

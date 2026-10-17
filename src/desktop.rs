@@ -251,7 +251,7 @@ pub fn decrypt_safe_storage(
 ) -> Result<String, Error> {
     use aes::Aes128;
     use cbc::Decryptor;
-    use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    use cbc::cipher::{BlockModeDecrypt, KeyIvInit, block_padding::Pkcs7};
 
     let encrypted = b64(encrypted_b64)?;
     let prefix = prefix3(&encrypted);
@@ -276,7 +276,7 @@ pub fn decrypt_safe_storage(
     let iv = [0x20u8; 16];
     let mut buf = encrypted[3..].to_vec();
     let out = Decryptor::<Aes128>::new(&key.into(), &iv.into())
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .decrypt_padded::<Pkcs7>(&mut buf)
         .map_err(|_| {
             desktop_err(
                 "DECRYPT_FAILED",
@@ -306,10 +306,11 @@ pub fn decrypt_windows(encrypted_b64: &str, key: &[u8]) -> Result<String, Error>
     }
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_| desktop_err("DECRYPT_FAILED", "Bad Safe Storage key length."))?;
-    let nonce = Nonce::from_slice(&encrypted[3..15]);
+    let nonce = Nonce::try_from(&encrypted[3..15])
+        .map_err(|_| desktop_err("DECRYPT_FAILED", "Bad Safe Storage nonce."))?;
     let out = cipher
         .decrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: &encrypted[15..],
                 aad: b"",

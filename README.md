@@ -6,7 +6,7 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](./LICENSE)
 
 **Version 0.1.0** · **Tests:** 117 unit and integration tests and 36 doctests, all passing ·
-**Coverage:** 99% of lines (`cargo llvm-cov --all-features`) · **MSRV:** Rust 1.88
+**Coverage:** 99% of lines (`cargo llvm-cov --all-features`) · **MSRV:** Rust 1.89
 
 An **unofficial** async Rust client for the Grok Bot gateway: the private API behind the
 Grok Bot desktop app that lists your bots, sends them prompts and reads their replies.
