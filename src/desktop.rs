@@ -828,12 +828,11 @@ pub fn find_install_dir(
             {
                 v.push(parent.to_path_buf());
             }
-            for desk in [PathBuf::from("/usr/share/applications/grok-bot.desktop")] {
-                if let Some(exec) = read_desktop_exec(&desk)
-                    && let Some(parent) = PathBuf::from(&exec).parent()
-                {
-                    v.push(parent.to_path_buf());
-                }
+            let desk = PathBuf::from("/usr/share/applications/grok-bot.desktop");
+            if let Some(exec) = read_desktop_exec(&desk)
+                && let Some(parent) = PathBuf::from(&exec).parent()
+            {
+                v.push(parent.to_path_buf());
             }
             v.extend([
                 PathBuf::from("/opt/grokbot-linux-port-bin"),
