@@ -48,15 +48,6 @@ pub struct Entry {
     pub raw: Value,
 }
 
-fn to_safe_text(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        Value::Number(_) | Value::Bool(_) => v.to_string(),
-        other => serde_json::to_string(other).unwrap_or_default(),
-    }
-}
-
 fn entry_text(e: &Value) -> String {
     if !e.is_object() {
         return String::new();
@@ -90,7 +81,7 @@ fn entry_text(e: &Value) -> String {
                 .get("text")
                 .and_then(Value::as_str)
                 .map(str::to_string)
-                .unwrap_or_else(|| to_safe_text(c));
+                .unwrap_or_else(|| c.to_string()); // compact JSON
         }
         _ => {}
     }
