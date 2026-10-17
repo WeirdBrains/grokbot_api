@@ -520,3 +520,58 @@ async fn policy_blocks_disallowed_gateway() {
         .is_ok()
     );
 }
+
+#[tokio::test]
+async fn team_agents_listed_from_backend_and_routed_with_viewer_session() {
+    let server = MockServer::start().await;
+    Mock::given(path("/aiserver.v1.GrokBotService/ListGrokBotTeamAgents"))
+        .and(header("authorization", "Bearer cur"))
+        .and(header("connect-protocol-version", "1"))
+        .and(body_json(json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": [
+            {"agent": {"agentId": "mine", "name": "Rocky", "viewerIsOwner": true, "viewerSessionId": "x"}},
+            {"agent": {"agentId": "chomp", "name": "Chomp", "viewerIsOwner": false,
+                       "visibility": "GROK_BOT_AGENT_VISIBILITY_TEAM", "viewerSessionId": "vs1"}}
+        ]})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // Shared agent: transcript and send carry the viewer session.
+    Mock::given(path("/api/getAgentTranscriptTail"))
+        .and(body_partial_json(
+            json!({"id": "chomp", "sessionId": "vs1"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/sendPrompt"))
+        .and(body_partial_json(
+            json!({"agentId": "chomp", "sessionId": "vs1"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accepted": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // Own agent: no sessionId.
+    Mock::given(path("/api/getAgentTranscriptTail"))
+        .and(body_json(json!({"id": "mine", "limit": 5})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"entries": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c =
+        Client::with_cursor_token(Session::new(server.uri(), "gw"), "cur", opts(&server)).unwrap();
+    let team = c.list_team_agents().await.unwrap().unwrap();
+    assert_eq!(team.len(), 2);
+    assert!(!team[1].viewer_is_owner && team[1].team_visible);
+    c.transcript_tail("chomp", 5, None).await.unwrap();
+    c.transcript_tail("mine", 5, None).await.unwrap();
+    c.send_prompt(&SendPrompt::new("chomp", "hi"))
+        .await
+        .unwrap();
+
+    // A plain gateway session has no Cursor token: no team list, no backend call.
+    let plain = Client::new(Session::new(server.uri(), "gw"), opts(&server)).unwrap();
+    assert!(plain.list_team_agents().await.unwrap().is_none());
+}

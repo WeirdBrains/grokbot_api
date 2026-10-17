@@ -278,3 +278,55 @@ impl AutoReviewResolution {
         }
     }
 }
+
+/// One agent from the Cursor backend's `GrokBotService/ListGrokBotTeamAgents`: your own
+/// agents plus team agents shared with you (which the box gateway's `listAgents` omits).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TeamAgent {
+    /// Gateway agent id (`agentId`); equals the gateway `listAgents` id for your own agents.
+    pub agent_id: String,
+    pub name: String,
+    pub description: String,
+    /// False for a team agent owned by someone else.
+    pub viewer_is_owner: bool,
+    /// Visibility is `GROK_BOT_AGENT_VISIBILITY_TEAM`.
+    pub team_visible: bool,
+    /// Your session with a shared agent; sent as `sessionId` to the gateway.
+    pub viewer_session_id: Option<String>,
+    pub owner_display_name: Option<String>,
+    pub is_room: bool,
+}
+
+impl TeamAgent {
+    /// Parse a `ListGrokBotTeamAgentsResponse` (`{entries: [{agent: {...}}]}`).
+    pub fn list(v: &Value) -> Vec<TeamAgent> {
+        let s = |a: &Value, k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let opt = |a: &Value, k: &str| {
+            a.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(str::to_string)
+        };
+        v.get("entries")
+            .and_then(Value::as_array)
+            .map(|es| {
+                es.iter()
+                    .filter_map(|e| e.get("agent"))
+                    .filter(|a| !s(a, "agentId").is_empty())
+                    .map(|a| TeamAgent {
+                        agent_id: s(a, "agentId"),
+                        name: s(a, "name"),
+                        description: s(a, "description"),
+                        viewer_is_owner: a.get("viewerIsOwner").and_then(Value::as_bool)
+                            != Some(false),
+                        team_visible: s(a, "visibility") == "GROK_BOT_AGENT_VISIBILITY_TEAM",
+                        viewer_session_id: opt(a, "viewerSessionId"),
+                        owner_display_name: opt(a, "ownerDisplayName"),
+                        is_room: s(a, "kind") == "GROK_BOT_AGENT_KIND_ROOM",
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}

@@ -164,15 +164,43 @@ pub async fn ensure_sandbox(access_token: &str, opts: &ClientOptions) -> Result<
     ensure_sandbox_with(&http, &base, access_token, opts).await
 }
 
-async fn ensure_sandbox_with(
-    http: &reqwest::Client,
-    base: &str,
+/// Call a unary `aiserver.v1.GrokBotService/<method>` on the Cursor backend (Connect JSON)
+/// with the same headers as EnsureSandBox. Returns the JSON body; the token is redacted
+/// from any error.
+pub async fn grokbot_service_call(
     access_token: &str,
+    method: &str,
+    body: &Value,
     opts: &ClientOptions,
-) -> Result<Session> {
-    const M: &str = "EnsureSandBox";
-    let url = format!("{base}/aiserver.v1.GrokBotService/EnsureSandBox");
-    let headers: BTreeMap<String, String> = [
+) -> Result<Value> {
+    let base = opts
+        .policy
+        .check_backend(&opts.backend_base)
+        .map_err(Error::Policy)?;
+    let http = http_client(opts.timeout)?;
+    let url = format!("{base}/aiserver.v1.GrokBotService/{method}");
+    let (status, out) = post(
+        &http,
+        &url,
+        &backend_headers(access_token, opts),
+        body,
+        method,
+        opts.max_response_bytes,
+        &[access_token],
+    )
+    .await?;
+    if !(200..300).contains(&status) {
+        return Err(Error::Http {
+            method: method.into(),
+            status,
+            message: redact(&detail(&out), &[access_token]),
+        });
+    }
+    Ok(out)
+}
+
+fn backend_headers(access_token: &str, opts: &ClientOptions) -> BTreeMap<String, String> {
+    [
         ("connect-protocol-version", "1".to_string()),
         ("authorization", format!("Bearer {access_token}")),
         ("x-cursor-client-type", opts.client_type.clone()),
@@ -181,7 +209,18 @@ async fn ensure_sandbox_with(
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
-    .collect();
+    .collect()
+}
+
+async fn ensure_sandbox_with(
+    http: &reqwest::Client,
+    base: &str,
+    access_token: &str,
+    opts: &ClientOptions,
+) -> Result<Session> {
+    const M: &str = "EnsureSandBox";
+    let url = format!("{base}/aiserver.v1.GrokBotService/EnsureSandBox");
+    let headers = backend_headers(access_token, opts);
     let (status, body) = post(
         http,
         &url,
@@ -245,6 +284,8 @@ async fn ensure_sandbox_with(
 struct State {
     session: Session,
     cursor_token: Option<String>,
+    /// Viewer session per shared agent id (from the team list), sent as `sessionId`.
+    agent_sessions: std::collections::HashMap<String, String>,
 }
 
 /// Async gateway client. Cheap to share behind an `Arc`; methods take `&self`.
@@ -267,6 +308,7 @@ impl Client {
             state: RwLock::new(State {
                 session,
                 cursor_token: None,
+                agent_sessions: Default::default(),
             }),
             refreshed: Mutex::new(None),
         })
@@ -471,6 +513,50 @@ impl Client {
     /// `sendPrompt {agentId, prompt, clientNonce, replyToId?}` → receipt only.
     ///
     /// On error use [`Error::delivery`]: `Unknown` means read the transcript before resending.
+    /// Route calls for `agent_id` through `session_id` (a shared agent's viewer session).
+    pub fn set_agent_session(&self, agent_id: &str, session_id: &str) {
+        self.state
+            .write()
+            .unwrap()
+            .agent_sessions
+            .insert(agent_id.into(), session_id.into());
+    }
+
+    fn agent_session(&self, agent_id: &str) -> Option<String> {
+        self.state
+            .read()
+            .unwrap()
+            .agent_sessions
+            .get(agent_id)
+            .cloned()
+    }
+
+    fn with_session(&self, agent_id: &str, mut body: Value) -> Value {
+        if let Some(s) = self.agent_session(agent_id) {
+            body["sessionId"] = json!(s);
+        }
+        body
+    }
+
+    /// Cursor backend `GrokBotService/ListGrokBotTeamAgents`: your agents plus team agents
+    /// shared with you. `Ok(None)` when this client has no Cursor access token (a plain
+    /// gateway session). Shared agents' viewer sessions are remembered for later calls.
+    pub async fn list_team_agents(&self) -> Result<Option<Vec<crate::TeamAgent>>> {
+        let Some(tok) = self.state.read().unwrap().cursor_token.clone() else {
+            return Ok(None);
+        };
+        let v = grokbot_service_call(&tok, "ListGrokBotTeamAgents", &json!({}), &self.opts).await?;
+        let list = crate::TeamAgent::list(&v);
+        for a in &list {
+            if !a.viewer_is_owner
+                && let Some(s) = &a.viewer_session_id
+            {
+                self.set_agent_session(&a.agent_id, s);
+            }
+        }
+        Ok(Some(list))
+    }
+
     pub async fn send_prompt(&self, req: &SendPrompt) -> Result<SendReceipt> {
         if req.prompt.is_empty() {
             return Err(Error::Validation("Prompt is empty.".into()));
@@ -484,6 +570,7 @@ impl Client {
         if let Some(r) = &req.reply_to_id {
             body["replyToId"] = json!(r);
         }
+        let body = self.with_session(&req.agent_id, body);
         let raw = self.call_raw("sendPrompt", body).await?;
         let (delivery, message_id) = classify_send(&raw, &nonce)?;
         Ok(SendReceipt {
@@ -506,7 +593,10 @@ impl Client {
             &self
                 .call_raw(
                     "promptAcceptanceStatus",
-                    json!({ "agentId": agent_id, "clientNonce": client_nonce }),
+                    self.with_session(
+                        agent_id,
+                        json!({ "agentId": agent_id, "clientNonce": client_nonce }),
+                    ),
                 )
                 .await?,
         ))
@@ -527,6 +617,7 @@ impl Client {
         if let Some(seq) = before_seq {
             body["beforeSeq"] = json!(seq);
         }
+        let body = self.with_session(id, body);
         Ok(Transcript::from_value(
             self.call_raw("getAgentTranscriptTail", body).await?,
         ))

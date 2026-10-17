@@ -37,6 +37,7 @@ mod types;
 pub use client::{
     AcceptanceStatus, Client, ClientOptions, DEFAULT_BACKEND_BASE, DEFAULT_CLIENT_TYPE,
     DEFAULT_CLIENT_VERSION, DEFAULT_SANDBOX_NAMESPACE, MAX_RESPONSE_BYTES, TIMEOUT, ensure_sandbox,
+    grokbot_service_call,
 };
 pub use error::{Delivery, Error, Result};
 pub use policy::{ALLOW_LOCAL_ENV, Policy};
@@ -44,5 +45,5 @@ pub use transcript::{Approval, ApprovalKind, Entry, Transcript, sanitize_text};
 pub use types::{
     AVATAR_COLORS, AVATAR_SHAPES, Agent, AgentProfile, AutoReviewResolution, CreateAgent,
     CreateGroup, ImportResult, LocalToolResolution, MAX_GROUP_MEMBERS, SKILL_MAX_BODY_LENGTH,
-    SendPrompt, SendReceipt, Session, SkippedImport, Workflow,
+    SendPrompt, SendReceipt, Session, SkippedImport, TeamAgent, Workflow,
 };
