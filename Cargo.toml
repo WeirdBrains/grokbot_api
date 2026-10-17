@@ -47,3 +47,7 @@ aes-gcm = "0.10"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
+
+[[example]]
+name = "desktop_session"
+required-features = ["desktop-session"]
