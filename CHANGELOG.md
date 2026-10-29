@@ -36,6 +36,14 @@ All notable changes to this crate are documented here. The format follows
   only with `Policy::allow_local_backend`), without redirects and without any bearer token.
   Errors and `Debug` output show the host only, never the query string or signature.
 
+### Verified
+
+- One live upload, from grokbot-tui on 2026-10-29. Begin returned `SINGLE_PUT` with a presigned S3
+  PUT that needs `Content-Length` and `x-amz-checksum-sha256`. Complete returned a path-like alias
+  (about 145 characters) with `contentType`. `/api/sendPrompt` accepted `attachmentPaths` and
+  `attachmentNames`, and `ResolveGrokBotAttachmentReads` returned `STORE` with a presigned GET of the
+  same bytes. Gateway transcript entries don't include attachment fields.
+
 ### Note
 
 - `SendPrompt` gained two public fields. Code that builds it with a struct literal needs
