@@ -25,6 +25,10 @@ All notable changes to this crate are documented here. The format follows
 - `SendPrompt::attachment_paths` and `attachment_names`, sent as `attachmentPaths` /
   `attachmentNames` when set.
 - `Client::has_cursor_session`.
+- Presence (new): `Client::report_desktop_activity(install_id, active)` returns the lease,
+  and `Client::report_client_presence(agent_id, viewing, typing, intent)` returns the TTL,
+  with `BoxIntent`. While an active desktop-activity lease is held, the backend can hold
+  push notifications to your other devices. The server decides.
 
 ### Security
 

@@ -235,3 +235,44 @@ async fn resolve_reads() {
     assert!(!format!("{:?}", r[0]).contains("sig="));
     let _ = UploadMode::SinglePut;
 }
+
+#[tokio::test]
+async fn presence_calls() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("{SVC}ReportGrokBotDesktopActivity")))
+        .and(body_partial_json(json!({"installId":"i1","active":true})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"leaseMs":"90000"})))
+        .mount(&s)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{SVC}ReportGrokBotClientPresence")))
+        .and(body_partial_json(
+            json!({"agentId":"a","viewing":true,"surface":"desktop",
+            "trigger":1}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"presenceTtlMs":120000})))
+        .mount(&s)
+        .await;
+    let c = cursor_client(&s, "gw");
+    assert_eq!(
+        c.report_desktop_activity("i1", true)
+            .await
+            .unwrap()
+            .as_secs(),
+        90
+    );
+    assert_eq!(
+        c.report_client_presence("a", true, true, None)
+            .await
+            .unwrap()
+            .as_secs(),
+        120
+    );
+    assert!(
+        client(&s)
+            .report_desktop_activity("i1", true)
+            .await
+            .is_err()
+    );
+}

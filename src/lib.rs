@@ -10,6 +10,7 @@ mod client;
 pub mod desktop;
 mod error;
 mod policy;
+mod presence;
 mod transcript;
 mod types;
 
@@ -26,6 +27,7 @@ pub use client::{
 };
 pub use error::{Delivery, Error, Result};
 pub use policy::{ALLOW_LOCAL_ENV, Policy};
+pub use presence::BoxIntent;
 pub use transcript::{Approval, ApprovalKind, Entry, Transcript, sanitize_text};
 pub use types::{
     AVATAR_COLORS, AVATAR_SHAPES, Agent, AgentProfile, AutoReviewResolution, CreateAgent,
