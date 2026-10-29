@@ -3,6 +3,7 @@
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod attachments;
 mod client;
 #[cfg(feature = "desktop-session")]
 #[cfg_attr(docsrs, doc(cfg(feature = "desktop-session")))]
@@ -14,6 +15,10 @@ mod types;
 
 pub mod guide;
 
+pub use attachments::{
+    AttachmentKind, AttachmentRead, ReadOutcome, UploadFailure, UploadMode, UploadProgress,
+    UploadRefusal, UploadedAttachment,
+};
 pub use client::{
     AcceptanceStatus, Client, ClientOptions, DEFAULT_BACKEND_BASE, DEFAULT_CLIENT_TYPE,
     DEFAULT_CLIENT_VERSION, DEFAULT_SANDBOX_NAMESPACE, MAX_RESPONSE_BYTES, TIMEOUT, ensure_sandbox,

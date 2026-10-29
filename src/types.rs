@@ -207,6 +207,11 @@ pub struct SendPrompt {
     pub client_nonce: Option<String>,
     /// Reply in a thread rooted at this entry id.
     pub reply_to_id: Option<String>,
+    /// Attachment aliases from [`Client::upload_attachment`](crate::Client::upload_attachment),
+    /// sent as `attachmentPaths` when non-empty.
+    pub attachment_paths: Vec<String>,
+    /// Display names matching `attachment_paths`, sent as `attachmentNames`.
+    pub attachment_names: Vec<String>,
 }
 
 impl SendPrompt {

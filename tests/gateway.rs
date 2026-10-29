@@ -96,6 +96,7 @@ async fn send_prompt_receipt_and_delivery_states() {
             prompt: "hi".into(),
             client_nonce: Some("n1".into()),
             reply_to_id: Some("r0".into()),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -121,6 +122,7 @@ async fn send_prompt_receipt_and_delivery_states() {
             prompt: "real".into(),
             client_nonce: Some("n9".into()),
             reply_to_id: None,
+            ..Default::default()
         })
         .await
         .unwrap();

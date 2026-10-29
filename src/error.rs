@@ -78,6 +78,10 @@ pub enum Error {
         /// A human-readable explanation.
         message: String,
     },
+    /// An attachment upload could not go ahead (refused, desktop-only bot, or no
+    /// Cursor session).
+    #[error("{0}")]
+    Attachment(crate::attachments::UploadFailure),
     /// The response was not the expected shape.
     #[error("{method}: {message}")]
     InvalidResponse {
@@ -108,7 +112,7 @@ impl Error {
     /// [`Delivery::Unknown`].
     pub fn delivery(&self) -> Delivery {
         match self {
-            Error::Policy(_) | Error::Validation(_) => Delivery::Rejected,
+            Error::Policy(_) | Error::Validation(_) | Error::Attachment(_) => Delivery::Rejected,
             Error::Http { status, .. } if *status < 500 => Delivery::Rejected,
             _ => Delivery::Unknown,
         }

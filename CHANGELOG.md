@@ -6,6 +6,37 @@ All notable changes to this crate are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-29
+
+### Added
+
+- Prompt attachments (new `attachments` module), on the Cursor backend's
+  `aiserver.v1.GrokBotService`. They need a client with a Cursor access token
+  (`Client::connect_cursor` / `Client::with_cursor_token`):
+  - `Client::upload_attachment`: begin, presigned PUT (single or multipart), complete,
+    with progress callbacks and abort on failure. Returns an `UploadedAttachment` with the alias.
+  - Low-level `begin_attachment_upload`, `presign_attachment_upload_parts`,
+    `complete_attachment_upload`, `abort_attachment_upload` and `resolve_attachment_reads`.
+  - `UploadMode`, `UploadRefusal` and `ReadOutcome` parse the full proto name, the short name or the number.
+  - `Error::Attachment(UploadFailure)` for refusals, desktop-only (`USE_BOX`) bots and
+    clients without a Cursor session.
+  - `validate_attachment`, `AttachmentKind` and the desktop app's limits: 25 MiB images,
+    250 MiB other files, 1 GiB video, 6 per prompt.
+- `SendPrompt::attachment_paths` and `attachment_names`, sent as `attachmentPaths` /
+  `attachmentNames` when set.
+- `Client::has_cursor_session`.
+
+### Security
+
+- Presigned upload URLs are used only exactly as returned, only over https (loopback http
+  only with `Policy::allow_local_backend`), without redirects and without any bearer token.
+  Errors and `Debug` output show the host only, never the query string or signature.
+
+### Note
+
+- `SendPrompt` gained two public fields. Code that builds it with a struct literal needs
+  `..Default::default()` (or `SendPrompt::new`).
+
 ## [1.1.0] - 2026-10-17
 
 Requires Rust 1.89 or newer.
@@ -61,5 +92,6 @@ First standalone release. The crate was previously developed inside the
   test suite.
 
 [Unreleased]: https://github.com/WeirdBrains/grokbot_api/compare/v1.1.0...HEAD
+[1.2.0]: https://github.com/WeirdBrains/grokbot_api/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/WeirdBrains/grokbot_api/compare/7a27c41...v1.1.0
 [1.0.0]: https://github.com/WeirdBrains/grokbot_api/tree/7a27c41

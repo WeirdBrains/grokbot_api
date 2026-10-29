@@ -570,6 +570,24 @@ impl Client {
             .insert(agent_id.into(), session_id.into());
     }
 
+    pub(crate) fn cursor_token_opt(&self) -> Option<String> {
+        self.state.read().unwrap().cursor_token.clone()
+    }
+
+    pub(crate) fn options(&self) -> &ClientOptions {
+        &self.opts
+    }
+
+    pub(crate) fn agent_session_id(&self, agent_id: &str) -> Option<String> {
+        self.agent_session(agent_id)
+    }
+
+    /// Whether this client holds a Cursor access token (needed for attachments and
+    /// team agents).
+    pub fn has_cursor_session(&self) -> bool {
+        self.cursor_token_opt().is_some()
+    }
+
     fn agent_session(&self, agent_id: &str) -> Option<String> {
         self.state
             .read()
@@ -605,7 +623,7 @@ impl Client {
         Ok(Some(list))
     }
 
-    /// `sendPrompt {agentId, prompt, clientNonce, replyToId?, sessionId?}` → receipt only.
+    /// `sendPrompt {agentId, prompt, clientNonce, replyToId?, attachmentPaths?, attachmentNames?, sessionId?}` → receipt only.
     ///
     /// Replies arrive later: poll [`Client::transcript_tail`]. On error use
     /// [`Error::delivery`]: `Unknown` means the prompt may have landed, so check the
@@ -624,6 +642,15 @@ impl Client {
             json!({ "agentId": req.agent_id, "prompt": req.prompt, "clientNonce": nonce });
         if let Some(r) = &req.reply_to_id {
             body["replyToId"] = json!(r);
+        }
+        if req.attachment_names.len() > req.attachment_paths.len() {
+            return Err(Error::Validation(
+                "More attachment names than attachment paths.".into(),
+            ));
+        }
+        if !req.attachment_paths.is_empty() {
+            body["attachmentPaths"] = json!(req.attachment_paths);
+            body["attachmentNames"] = json!(req.attachment_names);
         }
         let body = self.with_session(&req.agent_id, body);
         let raw = self.call_raw("sendPrompt", body).await?;
